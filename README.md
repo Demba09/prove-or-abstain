@@ -54,6 +54,9 @@ the outcome is identical with or without it — a deterministic mock
 
 ## Quickstart
 
+Requires Python 3.11+ (the pinned pandas/numpy versions do not install on
+older interpreters; developed and tested on 3.12).
+
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
