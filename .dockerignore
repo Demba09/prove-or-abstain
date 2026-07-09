@@ -1,0 +1,19 @@
+# Secrets — ne doivent JAMAIS entrer dans l'image.
+.env
+
+# Environnements / caches locaux
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache/
+.DS_Store
+
+# Inutile au runtime de l'API (panels en mémoire)
+data/
+tests/
+scripts/
+.git/
+.claude/
+.gitignore
+Dockerfile
+.dockerignore
