@@ -1,80 +1,56 @@
 # prove-or-abstain
 
-An auto-verifying causal investigation agent for SaaS metrics. It detects an
-anomaly in a metric (e.g. a conversion drop), generates falsifiable hypotheses
-about the cause, **tests each one with contribution-attribution math**, gates
-its own conclusion through a verifier, and ends on a **decision**: when the
-evidence supports a cause it recommends a scoped action (and can execute it
-under autopilot); **when the data cannot support any cause, it abstains and
-hands the wheel back to a human** — instead of acting on an unproven diagnosis.
+A causal investigation agent for product metrics. Given a baseline period and
+a current period, it determines whether a metric moved materially, tests which
+segment explains the move, and returns one of two verdicts:
 
-> An autopilot that can act must be able to refuse to act. This one **acts on
-> proof and disengages otherwise** — the abstention is a safety property, not
-> a gimmick.
+- **ASSERT** — the cause is localized and quantified, and the conclusion
+  passes every verification gate. The agent recommends a scoped action, or
+  executes it directly when autopilot is enabled and confidence is high.
+- **ABSTAIN** — the evidence does not single out a cause. The agent escalates
+  to a human and states which gate failed and why.
+
+The second verdict is the point of the design. An agent that is allowed to
+act on data needs a principled way to refuse to act when the data does not
+support a conclusion — otherwise it will always produce a plausible-sounding
+diagnosis, right or wrong.
 
 ![architecture](docs/architecture.svg)
 
-## Why this is credible
+## How it works
 
-The numbers come from `pandas`/`numpy`, **never** from the LLM. The model
-orders which dimensions to investigate first and writes the final verdict in
-plain language — but every figure is computed and auditable. Contributions
-decompose exactly: `rate + mix + interaction` sums to the observed change in
-the metric, with zero residual (`gate_check.py` proves this against a
-hand-derived oracle).
+The agent is a LangGraph state machine with six nodes and one conditional
+loop. When a dimension fails to localize the cause, the verifier routes back
+to the hypothesizer to try the next candidate dimension; the loop is bounded
+by the number of dimensions, so it always terminates.
 
-## Architecture
+| Node | Role |
+|------|------|
+| detector | compares each metric to its baseline, flags material moves |
+| hypothesizer | selects the next dimension to test |
+| investigator | decomposes the metric change along that dimension (`attribution.py`) |
+| verifier | checks the decomposition against the gates (`gates.py`) |
+| actuator | maps the verdict to a typed action: recommend, execute, or escalate |
+| reporter | writes the conclusion and keeps the full audit trail |
 
-```
-   detector ──route_after_detect──┐
-      │ "investigate"             │ "report" (no anomaly)
-      ▼                           │
- hypothesizer ◄──────┐            │
-      │              │ "loop"     │
-      ▼              │            │
- investigator        │            │
-      │              │            │
-      ▼              │            │
-   verifier ─route_after_verify───┤
-      │ "actuate"                 │
-      ▼                           │
-   actuator                       │
-      │                           │
-      ▼                           ▼
-   reporter ───────────────────► END
-```
+Responsibilities are split strictly. All numbers come from pandas/numpy. The
+LLM (Qwen via DashScope) does two things only: suggest the order in which
+dimensions are tested, and phrase the final report from figures that are
+already computed. It never produces a number and never decides a verdict, so
+the outcome is identical with or without it — a deterministic mock
+(`QWEN_MOCK=1`) runs the same pipeline offline.
 
-A LangGraph state machine with a **bounded** conditional loop: if a dimension
-doesn't clear the gates, the agent tries the next candidate dimension, up to
-`len(dims)` iterations — never an unbounded cycle. `graph.py` is the *only*
-file that imports `langgraph`; every node in `nodes.py` is a plain function
-`(state) -> dict` and can be chained by hand for testing.
+## Verification gates
 
-| Node | Role | Numbers from |
-|------|------|--------------|
-| detector | flag anomalies whose relative move clears materiality | pandas |
-| hypothesizer | pick the next dimension to test (LLM orders, never invents) | deterministic queue + LLM ordering |
-| investigator | decompose the metric's move on that dimension | pandas/numpy (`attribution.py`) |
-| verifier | run 4 gates -> ASSERT this dimension, or move on | deterministic thresholds (`gates.py`) |
-| actuator | map verdict + confidence -> a typed `Action` | deterministic mapping |
-| reporter | sourced, plain-language conclusion + audit trail | LLM rephrases pre-computed numbers |
+`ASSERT` requires all four gates to pass. A failed gate produces an
+`ABSTAIN` with the failing condition named in the response.
 
-**Autonomy.** By default the actuator only *proposes* an action
-(`RECOMMEND`/`ESCALATE`). It auto-executes (`EXECUTE`) only when
-`autopilot_enabled=True` **and** confidence `>= 0.70`. `ABSTAIN` never
-produces `EXECUTE` — this is enforced in code, not by convention.
-
-## The verifier gates
-
-`ASSERT` requires **all four** to pass; if any fails, the reason is named
-(no silent guess):
-
-| Gate | Threshold | What it catches |
-|------|-----------|------------------|
-| material | \|ΔR\|/R0 ≥ 2% | the anomaly is real, not noise |
-| localized | concentration ≥ 0.55 | one segment dominates the contribution |
-| sample | leading segment n ≥ 1000 | the "cause" isn't a statistical fluke |
-| clean | interaction share ≤ 0.50 | mix and rate effects aren't hopelessly entangled |
+| Gate | Condition | Purpose |
+|------|-----------|---------|
+| material | \|ΔR\|/R₀ ≥ 2% | the move is large enough to matter |
+| localized | top contribution share ≥ 0.55 | one segment actually dominates |
+| sample | leading segment n ≥ 1000 | the leader is not a small-sample artifact |
+| clean | interaction share ≤ 0.50 | rate and mix effects are separable |
 
 ## Quickstart
 
@@ -82,118 +58,82 @@ produces `EXECUTE` — this is enforced in code, not by convention.
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# offline / no API key needed — LLM calls fall back to a deterministic mock
-export QWEN_MOCK=1
+export QWEN_MOCK=1        # run offline; omit if DASHSCOPE_API_KEY is set
+pytest -q                 # math vs. oracle, gate verdicts, API behaviour
 
-# sanity-check the math and the gates against known-good oracles
-python gate_check.py           # decomposition matches a hand-derived oracle
-python gate_check_gates.py     # CLEAN->ASSERT, DIFFUSE/MIXSHIFT->ABSTAIN
-pytest -q
-
-# run the API
 uvicorn api.app:app --reload
 curl -X POST localhost:8000/investigate \
   -H 'content-type: application/json' -d '{"panel":"clean"}'
-curl -X POST localhost:8000/investigate \
-  -H 'content-type: application/json' -d '{"panel":"diffuse"}'
 ```
-
-With a real key (`DASHSCOPE_API_KEY`, Qwen via DashScope), unset `QWEN_MOCK`
-and the hypothesizer/reporter call the model instead of the deterministic
-fallback — the verdict never changes either way, only the prose and the
-dimension exploration order.
 
 ## API
 
 ```
 POST /investigate
-  body:   { "panel": "clean" | "diffuse" | "mixshift", "autopilot": bool = false }
-  return: { panel, verdict, confidence, root_cause, gates, action, report, trace }
+  body:   { "panel": "clean" | "diffuse" | "mixshift", "autopilot": false }
+  return: { verdict, confidence, root_cause, gates, action, report, trace }
 
 GET /health
-  return: { "status": "ok" }
 ```
 
-The endpoint is a thin wrapper: it builds the initial `AgentState`, calls
-`graph.invoke(state)`, and serializes the result. No business logic lives in
-FastAPI — everything is in the nodes.
+The endpoint builds the initial state, runs the graph, and serializes the
+result; the service layer contains no analysis logic.
 
-## The three demo panels
+Three built-in panels cover the three interesting outcomes:
 
-In-memory, deterministic, calibrated to exercise the gates differently
-(see `panels.py`):
+- `clean` — one segment's conversion rate collapses while everything else is
+  stable. The first dimension tried (`device`) fails to localize, the second
+  (`segment`) succeeds: **ASSERT**, cause `segment=paid`.
+- `diffuse` — every segment drops by the same amount. Same aggregate change
+  as `clean`, but no dimension concentrates it: **ABSTAIN**.
+- `mixshift` — population mix and rates shift at the same time, so rate and
+  mix effects are entangled: **ABSTAIN**, for a different named reason than
+  `diffuse`.
 
-- **`clean`** — the `paid` segment's conversion rate alone collapses
-  (7.0% → 5.0%), everything else unchanged. Looks diffuse along `device`
-  (paid splits ~50/50 mobile/desktop, so that dimension fails to localize) but
-  localizes cleanly along `segment` → the agent **loops once, then ASSERTs**
-  `segment=paid`.
-- **`diffuse`** — every segment's rate drops by the same 0.6pp. Same
-  aggregate ΔR as `clean`, but no dimension concentrates the contribution →
-  the agent exhausts both dimensions and **abstains**.
-- **`mixshift`** — composition *and* rates move at once (`organic` grows and
-  its rate drops, `paid` shrinks), so `rate`, `mix`, and `interaction` are all
-  non-zero. The interaction gate catches the entangled mechanism → **abstains**
-  for a different, harder reason than `diffuse`.
+With autopilot on (`"autopilot": true`), an ASSERT with confidence ≥ 0.70
+returns an `EXECUTE` action instead of a recommendation. An ABSTAIN never
+executes, regardless of flags; the test suite enforces this.
 
-## Attribution math (rate metrics)
+## Attribution math
 
-For an aggregate rate `R = Σ wₛ·rₛ` (segment weight × segment rate):
+For a rate metric `R = Σ wₛ·rₛ` (segment weight × segment rate), the change
+between periods decomposes exactly, per segment:
 
 ```
-ΔR = Σₛ (w₁ₛ·r₁ₛ − w₀ₛ·r₀ₛ)
-  rate        = w₀ₛ·(r₁ₛ − r₀ₛ)     # the segment's rate moved
-  mix         = r₀ₛ·(w₁ₛ − w₀ₛ)     # the composition moved
-  interaction = (w₁ₛ − w₀ₛ)(r₁ₛ − r₀ₛ)
-contribution_s = w₁ₛ·r₁ₛ − w₀ₛ·r₀ₛ    # sums to ΔR exactly, zero residual
+rate        = w₀·(r₁ − r₀)        the segment's rate moved
+mix         = r₀·(w₁ − w₀)        the population composition moved
+interaction = (w₁ − w₀)·(r₁ − r₀)
+contribution = rate + mix + interaction
 ```
 
-See `attribution.py` (production) and `attribution_reference.py` (the oracle
-`gate_check.py` diffs against).
+Segment contributions sum to the total ΔR with zero residual.
+`attribution.py` is validated against an independently written oracle
+(`attribution_reference.py`) in the test suite and in `gate_check.py`.
 
 ## Docker
 
 ```bash
 docker build -t prove-or-abstain .
 docker run -p 8000:8000 -e DASHSCOPE_API_KEY=... prove-or-abstain
-# no key -> falls back to mock mode automatically
-curl localhost:8000/health
 ```
 
-`.env` is never copied into the image (`.dockerignore`); secrets are injected
-at runtime — `docker run -e ...` locally, or the Alibaba Cloud environment
-variable panel in production.
-
-## Deployment (Alibaba Cloud)
-
-Container Registry (ACR) + Function Compute, custom-container runtime — the
-image runs as-is, no handler rewrite needed:
+Secrets are injected at runtime; `.env` is excluded from the image. Without
+a key the service falls back to mock mode. For Alibaba Cloud, push an
+amd64 image to Container Registry and run it on Function Compute
+(custom-container runtime, port 8000, HTTP trigger) — `/health` serves as
+the probe endpoint.
 
 ```bash
 docker buildx build --platform linux/amd64 \
   -t registry.<region>.aliyuncs.com/<namespace>/prove-or-abstain:v1 --push .
 ```
 
-Then in the FC console: new function → Custom Container runtime → point at
-the ACR image → port `8000` → set `DASHSCOPE_API_KEY` → attach an HTTP
-trigger. `/health` backs both the container `HEALTHCHECK` and FC's own probe.
+## Limitations
 
-## Status
-
-Phases 0–8 complete: attribution core validated against an oracle (Phase 0),
-gates tuned against `clean`/`diffuse`/`mixshift` (Phase 1), LangGraph loop
-wired end-to-end, Qwen client with a deterministic mock fallback, FastAPI
-surface, Dockerfile verified with a live container run. Phase 9 (this
-material) covers the writeup.
-
-## Roadmap (post-hackathon SaaS direction)
-
-Out of MVP scope, signalled here as product vision, not built for the demo:
-real action targets behind the actuator interface (Slack, Jira, Stripe, ad
-platforms), the **full closed control loop** (act → observe the effect →
-re-investigate), live connectors (Stripe, GA, warehouse), CSV/file upload for
-arbitrary panels, real-time monitoring + alerting, multi-tenant, a polished
-frontend, and memory of past investigations (pgvector).
+- Demo data is in-memory (`panels.py`); there is no ingestion layer yet.
+- Two-period comparison only (baseline vs. current), rate metrics only.
+- Actions are typed objects returned by the API; nothing is wired to real
+  downstream systems.
 
 ## License
 
