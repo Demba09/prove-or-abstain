@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+data/*.parquet
+data/*.csv
+.pytest_cache/
+.DS_Store
+.claude/settings.local.json
