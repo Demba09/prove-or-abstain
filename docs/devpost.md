@@ -17,11 +17,19 @@ can't localize a cause.
 rate move) the way a careful analyst would: it forms a hypothesis about which
 dimension explains the shift, tests it with an exact rate/mix/interaction
 decomposition, and checks the result against four deterministic gates
-(materiality, concentration, sample size, mechanism cleanliness). If a
-dimension clears all four, it **ASSERTs** the cause and proposes a scoped
-action — and can *execute* that action autonomously if confidence is high and
-autopilot is enabled. If no dimension clears the bar, it **ABSTAINs**,
-escalates to a human, and names exactly which gate failed and why.
+(materiality, concentration, a two-proportion z-test on the leading segment,
+mechanism cleanliness). If a dimension clears all four, it **ASSERTs** the
+cause, drills one level down to refine it (e.g. `device=mobile`, narrowed to
+`segment=paid` within mobile), and proposes a scoped action — which it can
+*execute* autonomously if confidence is high and autopilot is enabled. If no
+dimension clears the bar, it **ABSTAINs**, escalates to a human, and names
+exactly which gate failed and why.
+
+It works on rate metrics and sum metrics (revenue decomposes into volume ×
+average basket), takes arbitrary CSV panels or a multi-period time series
+with a rolling pooled baseline, and — after a proven verdict only — asks the
+LLM for business hypotheses about the *why*, clearly labelled as unverified
+speculation, never mixed with the proven numbers.
 
 It's built as a bounded LangGraph loop (never an unbounded cycle — the agent
 tries each candidate dimension once, in an LLM-suggested order, and stops),
@@ -76,8 +84,15 @@ Cloud Function Compute as-is.
 - An abstention that is a **safety property enforced in code**: `ABSTAIN`
   cannot produce `EXECUTE`, full stop, not a convention that's easy to
   violate.
-- Three calibrated scenarios that fail for three *different*, nameable
-  reasons (no anomaly / diffuse / entangled mix), not just "on" and "off".
+- A **principled significance gate**: the same perfectly-concentrated move
+  asserts on 6,000 users (p < 1e-5) and abstains on 60 (p = 0.55) — a real
+  two-proportion z-test, not a magic sample-size threshold.
+- **Drill-down**: after proving `device=mobile`, the agent re-decomposes
+  within mobile and narrows the cause to `segment=paid` — or states
+  explicitly that the whole segment is affected.
+- Calibrated scenarios that fail for *different*, nameable reasons (no
+  anomaly / diffuse / entangled mix / not significant), not just "on" and
+  "off".
 - A container that actually runs — build, `/health`, both verdict paths,
   all verified live, not just claimed.
 
@@ -86,8 +101,8 @@ Cloud Function Compute as-is.
 Out of MVP scope for the hackathon, but the direction is clear: real action
 targets behind the actuator (Slack, Jira, Stripe, ad platforms), a **closed
 control loop** that observes the effect of an executed action and
-re-investigates, live data connectors instead of in-memory demo panels,
-CSV/file upload for arbitrary metrics, real-time monitoring with alerting,
+re-investigates, live data connectors (warehouse, Stripe, GA) instead of CSV
+uploads, seasonality-aware baselines, real-time monitoring with alerting,
 and memory of past investigations so recurring causes are recognized faster.
 
 ## Built with

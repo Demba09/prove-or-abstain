@@ -8,7 +8,7 @@ os.environ["QWEN_MOCK"] = "1"   # avant tout import qui instancie le client
 
 from panels import BASELINE, CLEAN, DIFFUSE
 from nodes import (detector, route_after_detect, hypothesizer, investigator,
-                   verifier, route_after_verify, actuator, reporter)
+                   verifier, route_after_verify, driller, actuator, reporter)
 
 
 def run(state):
@@ -21,6 +21,7 @@ def run(state):
         state = {**state, **verifier(state)}
         if route_after_verify(state) == "actuate":
             break
+    state = {**state, **driller(state)}
     state = {**state, **actuator(state)}
     state = {**state, **reporter(state)}
     return state

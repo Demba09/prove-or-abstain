@@ -57,6 +57,11 @@
 
   .action { border-left: 3px solid var(--amber); background: var(--amber-bg); padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 14px 0; }
   .action b { color: var(--amber); }
+  .drill { color: var(--ink); margin: 4px 0 14px; }
+  .drill b { color: var(--indigo); }
+  .spec { border: 1px dashed var(--line); border-radius: 8px; padding: 10px 14px; margin: 14px 0; }
+  .spec .tag { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .spec ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 13.5px; }
   .report { font-style: italic; color: var(--ink); margin: 14px 0; }
   details { margin-top: 14px; }
   summary { cursor: pointer; color: var(--muted); }
@@ -75,9 +80,10 @@
       <button onclick="runPanel('clean')">clean</button>
       <button onclick="runPanel('diffuse')">diffuse</button>
       <button onclick="runPanel('mixshift')">mixshift</button>
+      <button onclick="runPanel('deep')">deep</button>
       <label class="toggle"><input type="checkbox" id="autopilot"> autopilot</label>
     </div>
-    <p class="hint">clean: one segment collapses &rarr; expect ASSERT &nbsp;·&nbsp; diffuse: uniform drop &rarr; ABSTAIN &nbsp;·&nbsp; mixshift: mix and rates entangled &rarr; ABSTAIN</p>
+    <p class="hint">clean: one segment collapses &rarr; ASSERT &nbsp;·&nbsp; diffuse: uniform drop &rarr; ABSTAIN &nbsp;·&nbsp; mixshift: mix and rates entangled &rarr; ABSTAIN &nbsp;·&nbsp; deep: one cell collapses &rarr; ASSERT, then drills down</p>
     <div class="divider"></div>
     <p class="hint">Or investigate your own data — two CSVs with columns <code>metric, &lt;dimensions...&gt;, n, c</code> (see <code>examples/</code>):</p>
     <div class="row">
@@ -95,8 +101,10 @@
       <span class="meta" id="rootcause"></span>
     </div>
     <div class="gates" id="gates"></div>
+    <p class="drill" id="drill"></p>
     <div class="action" id="action"></div>
     <p class="report" id="report"></p>
+    <div class="spec" id="spec"></div>
     <details><summary>investigation trace</summary><ol class="trace" id="trace"></ol></details>
   </div>
 
@@ -162,18 +170,37 @@ function render(b) {
   for (const [dim, g] of Object.entries(b.gates || {})) {
     const el = document.createElement('div');
     el.className = 'gate ' + g.verdict.toLowerCase();
+    const pval = g.leading_p != null ? ` · p ${g.leading_p.toExponential(1)}` : '';
     el.innerHTML =
       `<h3><span>dimension: ${dim}</span><span class="v">${g.verdict}</span></h3>
        <ul>${g.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
        <div class="nums">leader: ${g.leading_segment ?? '—'} · concentration ${g.concentration.toFixed(2)}
-         · interaction ${g.interaction_share.toFixed(2)} · n ${g.leading_sample_n ?? '—'}</div>`;
+         · interaction ${g.interaction_share.toFixed(2)} · n ${g.leading_sample_n ?? '—'}${pval}</div>`;
     gates.appendChild(el);
+  }
+
+  const d = b.drilldown;
+  $('drill').style.display = d ? 'block' : 'none';
+  if (d) {
+    const parent = `${d.parent.dim} = ${d.parent.segment}`;
+    $('drill').innerHTML = d.refined
+      ? `drill-down: within <b>${parent}</b>, the cause narrows to <b>${d.refined.dim} = ${d.refined.segment}</b> (concentration ${d.refined.concentration.toFixed(2)})`
+      : `drill-down: within <b>${parent}</b>, no sub-dimension localizes further — the whole segment is affected`;
   }
 
   $('action').style.display = b.action ? 'block' : 'none';
   if (b.action) $('action').innerHTML = `<b>${b.action.kind}</b> — ${b.action.detail}`;
 
   $('report').textContent = b.report || '';
+
+  const specs = b.speculations || [];
+  $('spec').style.display = specs.length ? 'block' : 'none';
+  if (specs.length) {
+    $('spec').innerHTML =
+      `<div class="tag">possible business causes — LLM speculation, not verified</div>
+       <ul>${specs.map(s => `<li>${s}</li>`).join('')}</ul>`;
+  }
+
   $('trace').innerHTML = (b.trace || []).map(t => `<li>${t}</li>`).join('');
 }
 </script>

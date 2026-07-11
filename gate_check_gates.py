@@ -32,6 +32,7 @@ for name, curr in [("CLEAN", CLEAN), ("DIFFUSE", DIFFUSE), ("MIXSHIFT", MIXSHIFT
     print(f"  concentration    : {rep.concentration:.3f}")
     print(f"  interaction_share: {rep.interaction_share:.3f}")
     print(f"  n meneur         : {rep.leading_sample_n:.0f}")
+    print(f"  test z meneur    : z={rep.leading_z:+.2f}, p={rep.leading_p:.4f}")
     print(f"  ΔR relatif       : {rep.delta_R_relative:.1%}")
     print(f"  confiance        : {rep.confidence:.3f}")
     print(f"  raisons          : {rep.reasons}")

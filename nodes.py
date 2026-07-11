@@ -15,7 +15,7 @@ Pas de LLM (Phase 2). hypothesizer/reporter sont déterministes.
 """
 from __future__ import annotations
 
-from attribution import decompose
+from attribution import decompose, decompose_sum
 from metrics import aggregate
 from gates import evaluate_gates, MATERIAL_REL
 from agent_state import AgentState, MetricAnomaly, Action
@@ -27,6 +27,12 @@ def _log(state: AgentState, msg: str) -> list[str]:
     return state.get("trace", []) + [msg]
 
 
+def _kind(state: AgentState, metric: str) -> str:
+    """"rate" (défaut) ou "sum" — sélectionne la math d'attribution et la gate
+    de significativité."""
+    return state.get("metric_kinds", {}).get(metric, "rate")
+
+
 # ---------------------------------------------------------------- detector
 def detector(state: AgentState) -> dict:
     """Scanne chaque métrique, repère celles dont le mouvement global est matériel."""
@@ -35,8 +41,11 @@ def detector(state: AgentState) -> dict:
     for m in state["metrics"]:
         n0, c0 = metric_totals(base, m)
         n1, c1 = metric_totals(curr, m)
-        R0 = c0 / n0 if n0 else 0.0
-        R1 = c1 / n1 if n1 else 0.0
+        if _kind(state, m) == "sum":
+            R0, R1 = c0, c1          # une somme se compare directement
+        else:
+            R0 = c0 / n0 if n0 else 0.0
+            R1 = c1 / n1 if n1 else 0.0
         delta_rel = abs(R1 - R0) / (abs(R0) + 1e-12)
         if delta_rel >= MATERIAL_REL:
             anomalies.append(MetricAnomaly(m, R0, R1, delta_rel))
@@ -98,18 +107,25 @@ def hypothesizer(state: AgentState) -> dict:
 
 
 # ------------------------------------------------------------- investigator
+def _decompose_on(state: AgentState, base, curr, metric: str, dim: str):
+    """Projette (métrique, dim) et décompose avec la math du type de métrique.
+    Renvoie (out, agg, kind) — partagé par investigator et driller."""
+    kind = _kind(state, metric)
+    base_p = project(base, metric, dim)
+    curr_p = project(curr, metric, dim)
+    fn = decompose_sum if kind == "sum" else decompose
+    out = fn(base_p, curr_p, dims=dim)
+    return out, aggregate(out), kind
+
+
 def investigator(state: AgentState) -> dict:
     """Projette sur (métrique, dim courante) et décompose (math exacte)."""
     metric, dim = state["target_metric"], state["current_dim"]
-    base_p = project(state["baseline"], metric, dim)
-    curr_p = project(state["current"], metric, dim)
-
-    out = decompose(base_p, curr_p, dims=dim)
-    agg = aggregate(out)
-    baseline_n = base_p.set_index(dim)["n"]
+    out, agg, kind = _decompose_on(state, state["baseline"], state["current"],
+                                   metric, dim)
 
     return {
-        "investigation": {"out": out, "agg": agg, "baseline_n": baseline_n},
+        "investigation": {"out": out, "agg": agg, "kind": kind},
         "trace": _log(state,
             f"investigator : décomposition sur '{dim}' "
             f"(résidu={agg['residual']:+.1e})."),
@@ -120,7 +136,7 @@ def investigator(state: AgentState) -> dict:
 def verifier(state: AgentState) -> dict:
     """Passe la décomposition par les gates -> verdict de la dimension courante."""
     inv = state["investigation"]
-    rep = evaluate_gates(inv["agg"], inv["out"], baseline_n=inv["baseline_n"])
+    rep = evaluate_gates(inv["agg"], inv["out"], kind=inv.get("kind", "rate"))
     dim = state["current_dim"]
 
     reports = dict(state.get("reports_by_dim", {}))
@@ -148,6 +164,49 @@ def route_after_verify(state: AgentState) -> str:
     return "actuate"
 
 
+# ------------------------------------------------------------------ driller
+def driller(state: AgentState) -> dict:
+    """Drill-down après ASSERT : filtre le panel sur le segment gagnant et
+    re-décompose le long des AUTRES dimensions pour affiner la localisation.
+    Un niveau, borné par len(dims) — et no-op sur ABSTAIN."""
+    win = state.get("winning_report")
+    if win is None:
+        return {"drilldown": None}
+
+    metric = state["target_metric"]
+    dim, seg = state["winning_dim"], win.leading_segment
+    base = state["baseline"]
+    curr = state["current"]
+    base_f = base[base[dim] == seg]
+    curr_f = curr[curr[dim] == seg]
+
+    sub_reports, refined = {}, None
+    for other in state["dims"]:
+        if other == dim:
+            continue
+        out, agg, kind = _decompose_on(state, base_f, curr_f, metric, other)
+        rep = evaluate_gates(agg, out, kind=kind)
+        sub_reports[other] = rep
+        if rep.verdict == "ASSERT" and refined is None:
+            refined = {"dim": other, "segment": rep.leading_segment,
+                       "concentration": rep.concentration,
+                       "confidence": rep.confidence}
+
+    if refined:
+        msg = (f"driller : au sein de {dim}={seg}, la cause s'affine sur "
+               f"{refined['dim']}={refined['segment']} "
+               f"(concentration {refined['concentration']:.2f}).")
+    else:
+        msg = (f"driller : au sein de {dim}={seg}, aucune sous-dimension ne "
+               f"localise davantage — tout le segment est touché.")
+
+    return {
+        "drilldown": {"parent": {"dim": dim, "segment": seg},
+                      "reports_by_dim": sub_reports, "refined": refined},
+        "trace": _log(state, msg),
+    }
+
+
 # ----------------------------------------------------------------- actuator
 def actuator(state: AgentState) -> dict:
     """Mappe verdict + confiance -> Action typée. ABSTAIN n'exécute JAMAIS."""
@@ -158,13 +217,17 @@ def actuator(state: AgentState) -> dict:
     if win is not None:  # au moins une dimension a localisé -> ASSERT
         verdict, conf = "ASSERT", win.confidence
         seg, dim = win.leading_segment, state.get("winning_dim")
+        target = f"{dim}={seg}"
+        refined = (state.get("drilldown") or {}).get("refined")
+        if refined:
+            target += f" ∧ {refined['dim']}={refined['segment']}"
         if conf >= 0.70 and autopilot:
             action = Action("EXECUTE", metric, dim, seg,
-                            f"Autopilot : action ciblée sur {dim}={seg} (conf {conf:.2f}).")
+                            f"Autopilot : action ciblée sur {target} (conf {conf:.2f}).")
         else:
             why = "autopilot désactivé" if conf >= 0.70 else f"confiance {conf:.2f} < 0.70"
             action = Action("RECOMMEND", metric, dim, seg,
-                            f"Cause localisée {dim}={seg} ; recommandation seule ({why}).")
+                            f"Cause localisée {target} ; recommandation seule ({why}).")
     else:  # aucune dimension n'a localisé -> ABSTAIN
         verdict, conf = "ABSTAIN", 0.0
         # on remonte la meilleure tentative pour expliquer le refus
@@ -186,9 +249,12 @@ def actuator(state: AgentState) -> dict:
 # ----------------------------------------------------------------- reporter
 def reporter(state: AgentState) -> dict:
     """Synthèse lisible. Le LLM REFORMULE des chiffres déjà calculés ; en mock
-    ou en cas d'erreur, on retombe sur la rédaction déterministe (template)."""
+    ou en cas d'erreur, on retombe sur la rédaction déterministe (template).
+    Sur ASSERT, le LLM ajoute des hypothèses MÉTIER étiquetées spéculation —
+    séparées du verdict prouvé, jamais mélangées aux chiffres."""
     verdict = state.get("verdict", "NO_ANOMALY")
     metric = state.get("target_metric", "—")
+    speculations: list[str] = []
 
     if verdict == "NO_ANOMALY":
         payload = {"verdict": "NO_ANOMALY", "metric": metric}
@@ -204,6 +270,10 @@ def reporter(state: AgentState) -> dict:
                 "concentration": rep.concentration,
                 "confidence": rep.confidence,
             })
+            refined = (state.get("drilldown") or {}).get("refined")
+            if refined:
+                payload["refined"] = f"{refined['dim']}={refined['segment']}"
+            speculations = get_client().speculate_causes(payload)
         else:  # ABSTAIN
             reports = state.get("reports_by_dim", {})
             best = max((r.concentration for r in reports.values()), default=0.0)
@@ -213,4 +283,5 @@ def reporter(state: AgentState) -> dict:
             })
 
     text = get_client().write_report(payload)
-    return {"report": text, "trace": _log(state, f"reporter : {verdict} rédigé.")}
+    return {"report": text, "speculations": speculations,
+            "trace": _log(state, f"reporter : {verdict} rédigé.")}

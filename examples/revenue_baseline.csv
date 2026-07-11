@@ -1,0 +1,9 @@
+metric,segment,device,n,c
+revenue,organic,mobile,3000,60000
+revenue,organic,desktop,3000,60000
+revenue,paid,mobile,3000,75000
+revenue,paid,desktop,3000,75000
+revenue,referral,mobile,3000,90000
+revenue,referral,desktop,3000,90000
+revenue,email,mobile,3000,120000
+revenue,email,desktop,3000,120000

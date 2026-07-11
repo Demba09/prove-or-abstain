@@ -41,6 +41,7 @@ class AgentState(TypedDict, total=False):
     baseline: pd.DataFrame          # panel long : [metric, *dims, n, c]
     current: pd.DataFrame
     metrics: list[str]
+    metric_kinds: dict              # metric -> "rate" (défaut) | "sum"
     dims: list[str]                 # dimensions candidates, dans l'ordre d'essai
     autopilot_enabled: bool
 
@@ -65,7 +66,11 @@ class AgentState(TypedDict, total=False):
     winning_dim: Optional[str]
     winning_report: Optional[GateReport]
 
+    # --- drill-down (après ASSERT : affiner au sein du segment gagnant) ---
+    drilldown: Optional[dict]       # {parent, reports_by_dim, refined}
+
     # --- sortie ---
     actions: list[Action]
     report: str
+    speculations: list[str]         # hypothèses métier LLM, étiquetées spéculation
     trace: list[str]                # journal lisible de l'investigation
