@@ -7,7 +7,7 @@ Panel long : une ligne par cellule atomique [metric, segment, device, n, c]
 project() projette ce panel sur UNE métrique + UNE dimension via groupby :
 c'est la couche "per-hypothesis projection". decompose() opère ensuite dessus.
 
-Trois scénarios calibrés (structure opposée sur 'conversion') :
+Quatre scénarios calibrés (structure opposée sur 'conversion') :
   CLEAN    : seul le segment 'paid' décroche. Localise le long de 'segment',
              mais paraît diffus le long de 'device' (paid ~50/50 mobile/desktop).
              -> la boucle essaie 'device' (ABSTAIN) puis 'segment' (ASSERT).
@@ -16,6 +16,8 @@ Trois scénarios calibrés (structure opposée sur 'conversion') :
   MIXSHIFT : composition ET taux bougent en même temps (mix + rate + interaction
              tous non nuls). Mêmes totaux par segment que le MIXSHIFT validé dans
              gate_check_gates.py -> ABSTAIN, mécanisme entremêlé.
+  DEEP     : seul paid × mobile s'effondre -> ASSERT device=mobile, puis le
+             drill-down affine : segment=paid au sein de mobile.
 """
 from __future__ import annotations
 import pandas as pd
@@ -37,31 +39,39 @@ _ACT0 = {"organic": 0.30, "paid": 0.32, "referral": 0.28, "email": 0.35}
 
 
 def _rows(rate_conv, rate_act, n_map=None):
-    """Construit un panel long à partir de fonctions (segment->taux)."""
+    """Construit un panel long à partir de fonctions (segment, device)->taux."""
     n_map = _N if n_map is None else n_map
     rows = []
     for seg in SEGMENTS:
         for dev in DEVICES:
             n = n_map[(seg, dev)]
             rows.append({"metric": "conversion", "segment": seg, "device": dev,
-                         "n": n, "c": round(n * rate_conv(seg))})
+                         "n": n, "c": round(n * rate_conv(seg, dev))})
             rows.append({"metric": "activation", "segment": seg, "device": dev,
-                         "n": n, "c": round(n * rate_act(seg))})
+                         "n": n, "c": round(n * rate_act(seg, dev))})
     return pd.DataFrame(rows)
 
 
-BASELINE = _rows(lambda s: _RATE0[s], lambda s: _ACT0[s])
+BASELINE = _rows(lambda s, d: _RATE0[s], lambda s, d: _ACT0[s])
 
 # CLEAN : conversion de 'paid' chute 7.0% -> 5.0% ; le reste inchangé.
 CLEAN = _rows(
-    lambda s: 0.05 if s == "paid" else _RATE0[s],
-    lambda s: _ACT0[s],
+    lambda s, d: 0.05 if s == "paid" else _RATE0[s],
+    lambda s, d: _ACT0[s],
 )
 
 # DIFFUSE : conversion de TOUS les segments baisse de 0.6pp ; même ΔR global.
 DIFFUSE = _rows(
-    lambda s: _RATE0[s] - 0.006,
-    lambda s: _ACT0[s],
+    lambda s, d: _RATE0[s] - 0.006,
+    lambda s, d: _ACT0[s],
+)
+
+# DEEP : seul le croisement paid × mobile s'effondre (7.0% -> 3.0%).
+# Localise d'abord sur UNE dimension (device=mobile), puis le drill-down
+# affine au sein de mobile : segment=paid. Démontre le raffinement.
+DEEP = _rows(
+    lambda s, d: 0.03 if (s, d) == ("paid", "mobile") else _RATE0[s],
+    lambda s, d: _ACT0[s],
 )
 
 # MIXSHIFT : la composition bouge (organic gonfle, paid rétrécit) ET les taux
@@ -77,8 +87,8 @@ _N_MIXSHIFT = {
 _RATE_MIXSHIFT = {"organic": 0.045, "paid": 0.08, "referral": 0.08, "email": 0.10}
 
 MIXSHIFT = _rows(
-    lambda s: _RATE_MIXSHIFT[s],
-    lambda s: _ACT0[s],
+    lambda s, d: _RATE_MIXSHIFT[s],
+    lambda s, d: _ACT0[s],
     n_map=_N_MIXSHIFT,
 )
 
@@ -94,3 +104,40 @@ def project(panel: pd.DataFrame, metric: str, dim: str) -> pd.DataFrame:
     Retourne [dim, n, c] — prêt pour decompose(base, curr, dims=dim)."""
     sub = panel[panel["metric"] == metric]
     return sub.groupby(dim, as_index=False)[["n", "c"]].sum()
+
+
+# --------------------------------------------------------- série temporelle
+def split_series(panel: pd.DataFrame, window: int | None = None,
+                 period_col: str = "period") -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Découpe un panel long multi-périodes en (baseline, current).
+
+    current  = la dernière période.
+    baseline = les `window` périodes précédentes (toutes si None), POOLÉES en
+               sommant n et c par cellule — une baseline glissante, plus robuste
+               qu'une seule période de référence.
+    """
+    periods = sorted(panel[period_col].unique())
+    if len(periods) < 2:
+        raise ValueError("a series panel needs at least 2 periods")
+    base_periods = periods[:-1] if window is None else periods[-1 - window:-1]
+
+    keys = [col for col in panel.columns if col not in (period_col, "n", "c")]
+    base = (panel[panel[period_col].isin(base_periods)]
+            .groupby(keys, as_index=False)[["n", "c"]].sum())
+    curr = (panel[panel[period_col] == periods[-1]]
+            .groupby(keys, as_index=False)[["n", "c"]].sum())
+    return base, curr
+
+
+def make_series(n_periods: int = 8) -> pd.DataFrame:
+    """Panel de démo multi-périodes : n_periods-1 semaines stables (BASELINE),
+    puis la dernière semaine décroche (CLEAN). Déterministe."""
+    frames = []
+    for p in range(n_periods - 1):
+        f = BASELINE.copy()
+        f["period"] = p
+        frames.append(f)
+    last = CLEAN.copy()
+    last["period"] = n_periods - 1
+    frames.append(last)
+    return pd.concat(frames, ignore_index=True)

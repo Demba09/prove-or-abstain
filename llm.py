@@ -77,6 +77,27 @@ class QwenClient:
         except Exception:
             return list(dims)                                # fallback : ordre d'origine
 
+    # --- usage 3 : spéculer sur le POURQUOI métier (étiqueté, jamais mélangé
+    # au verdict prouvé ; ne calcule rien, ne décide rien) ---
+    def speculate_causes(self, payload: dict) -> list[str]:
+        if self.mock:
+            return template_speculations(payload)
+        system = (
+            "Une investigation causale a PROUVÉ qu'une variation de métrique se "
+            "localise sur un segment donné. Propose 2 hypothèses MÉTIER plausibles "
+            "sur la cause racine (campagne, prix, produit, technique...). Ce sont "
+            "des spéculations à vérifier par un humain : n'invente aucun chiffre, "
+            "ne reformule pas le verdict. Renvoie UNIQUEMENT un tableau JSON de "
+            "2 chaînes courtes en français, chacune formulée comme une question."
+        )
+        try:
+            out = json.loads(_strip_fences(self.complete(system,
+                    json.dumps(payload, ensure_ascii=False), max_tokens=200)))
+            out = [s for s in out if isinstance(s, str)][:3]
+            return out or template_speculations(payload)
+        except Exception:
+            return template_speculations(payload)
+
     # --- usage 2 : rédiger la conclusion (ne calcule rien) ---
     def write_report(self, payload: dict) -> str:
         if self.mock:
@@ -101,13 +122,26 @@ def template_report(p: dict) -> str:
     if verdict == "NO_ANOMALY":
         return "Aucune anomalie matérielle détectée. Rien à expliquer."
     if verdict == "ASSERT":
+        refined = f" Le drill-down affine la cause sur {p['refined']}." if p.get("refined") else ""
         return (f"PROUVÉ — la variation de '{metric}' se localise sur "
                 f"{p['winning_dim']}={p['leading_segment']} "
-                f"(concentration {p['concentration']:.0%}, confiance {p['confidence']:.2f}). "
+                f"(concentration {p['concentration']:.0%}, confiance {p['confidence']:.2f})."
+                f"{refined} "
                 f"Action : {p['action_kind']}. {p['action_detail']}")
     return (f"ABSTENTION — la variation de '{metric}' est réelle mais ne se localise "
             f"sur aucune dimension testée ({', '.join(p.get('dims_tried', []))}). "
             f"Cause vraisemblablement systémique. Action : {p['action_kind']}. {p['action_detail']}")
+
+
+def template_speculations(p: dict) -> list[str]:
+    """Spéculations déterministes (mode mock / fallback)."""
+    tgt = p.get("refined") or f"{p.get('winning_dim')}={p.get('leading_segment')}"
+    return [
+        f"Quelque chose a-t-il changé récemment côté {tgt} — campagne, prix, "
+        f"landing page, tracking ?",
+        f"Un incident technique limité à {tgt} (intégration, paiement, latence) "
+        f"coïncide-t-il avec la période ?",
+    ]
 
 
 # --- singleton paresseux partagé par les nodes ---

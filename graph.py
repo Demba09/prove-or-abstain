@@ -1,5 +1,5 @@
 """
-graph.py — assemble les six nodes dans un StateGraph LangGraph.
+graph.py — assemble les sept nodes dans un StateGraph LangGraph.
 
 Topologie :
 
@@ -17,6 +17,9 @@ Topologie :
        verifier ─route_after_verify───┤
           │ "actuate"                 │
           ▼                           │
+       driller  (affine au sein du    │
+          │      segment gagnant)     │
+          ▼                           │
        actuator                       │
           │                           │
           ▼                           ▼
@@ -32,7 +35,7 @@ from agent_state import AgentState
 from nodes import (detector, route_after_detect,
                    hypothesizer, investigator,
                    verifier, route_after_verify,
-                   actuator, reporter)
+                   driller, actuator, reporter)
 
 
 def build_graph():
@@ -42,6 +45,7 @@ def build_graph():
     g.add_node("hypothesizer", hypothesizer)
     g.add_node("investigator", investigator)
     g.add_node("verifier", verifier)
+    g.add_node("driller", driller)
     g.add_node("actuator", actuator)
     g.add_node("reporter", reporter)
 
@@ -54,8 +58,9 @@ def build_graph():
     g.add_edge("investigator", "verifier")
     g.add_conditional_edges(
         "verifier", route_after_verify,
-        {"loop": "hypothesizer", "actuate": "actuator"},
+        {"loop": "hypothesizer", "actuate": "driller"},
     )
+    g.add_edge("driller", "actuator")
     g.add_edge("actuator", "reporter")
     g.add_edge("reporter", END)
 

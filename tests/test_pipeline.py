@@ -152,3 +152,109 @@ def test_upload_rejects_mismatched_columns():
     })
     assert r.status_code == 400
     assert "same columns" in r.json()["detail"]
+
+
+# ------------------------------------------------- gate de significativité
+def test_significance_gate_rejects_small_samples():
+    # Mêmes taux que CLEAN mais n divisé par 100 : la concentration est
+    # parfaite, pourtant le mouvement n'est plus significatif -> ABSTAIN.
+    # C'est exactement ce qu'un plancher n>=1000 ne savait pas expliquer.
+    scale = 100
+    small_base = REF_BASELINE.assign(n=REF_BASELINE.n // scale, c=REF_BASELINE.c // scale)
+    small_curr = REF_CLEAN.assign(n=REF_CLEAN.n // scale, c=REF_CLEAN.c // scale)
+    out = decompose(small_base, small_curr, dims="segment")
+    rep = evaluate_gates(aggregate(out), out)
+    assert rep.verdict == "ABSTAIN"
+    assert any("non significatif" in r for r in rep.reasons)
+
+
+def test_significance_gate_passes_on_clean():
+    out = decompose(REF_BASELINE, REF_CLEAN, dims="segment")
+    rep = evaluate_gates(aggregate(out), out)
+    assert rep.verdict == "ASSERT"
+    assert rep.leading_p < 0.01 and abs(rep.leading_z) > 2.576
+
+
+# --------------------------------------------------------- métriques somme
+def test_decompose_sum_exact():
+    from attribution import decompose_sum
+    base = pd.DataFrame([{"segment": "a", "n": 100, "c": 2000},
+                         {"segment": "b", "n": 50, "c": 2500}])
+    curr = pd.DataFrame([{"segment": "a", "n": 120, "c": 1800},
+                         {"segment": "b", "n": 50, "c": 2500}])
+    out = decompose_sum(base, curr, dims="segment")
+    # contribution_s == c1 - c0, et somme == ΔV, résidu nul
+    assert np.allclose(out["contribution"], out["c1"] - out["c0"])
+    agg = aggregate(out)
+    assert abs(agg["residual"]) < 1e-9
+    assert agg["delta_R"] == (1800 + 2500) - (2000 + 2500)
+
+
+def test_sum_metric_upload_asserts():
+    r = client.post("/investigate/upload",
+                    files={"baseline": open("examples/revenue_baseline.csv", "rb"),
+                           "current": open("examples/revenue_current.csv", "rb")},
+                    data={"sum_metrics": "revenue"})
+    body = r.json()
+    assert body["verdict"] == "ASSERT"
+    assert body["root_cause"] == {"dimension": "segment", "segment": "paid"}
+
+
+# --------------------------------------------------------------- drill-down
+def test_deep_panel_drills_down():
+    body = client.post("/investigate", json={"panel": "deep"}).json()
+    assert body["verdict"] == "ASSERT"
+    assert body["root_cause"] == {"dimension": "device", "segment": "mobile"}
+    refined = body["drilldown"]["refined"]
+    assert refined["dim"] == "segment" and refined["segment"] == "paid"
+    assert "segment=paid" in body["action"]["detail"]
+
+
+def test_clean_panel_does_not_refine():
+    # paid est réparti 50/50 mobile/desktop : rien à affiner, et le driller
+    # doit le dire au lieu d'inventer une sous-cause.
+    body = client.post("/investigate", json={"panel": "clean"}).json()
+    assert body["verdict"] == "ASSERT"
+    assert body["drilldown"]["refined"] is None
+
+
+def test_abstain_has_no_drilldown():
+    body = client.post("/investigate", json={"panel": "diffuse"}).json()
+    assert body["drilldown"] is None
+
+
+# ---------------------------------------------------------- série temporelle
+def test_series_endpoint_rolling_baseline():
+    from panels import make_series
+    r = client.post("/investigate/series", files={
+        "series": ("series.csv", _csv(make_series()), "text/csv"),
+    })
+    body = r.json()
+    assert body["panel"] == "series"
+    assert body["verdict"] == "ASSERT"
+    assert body["root_cause"] == {"dimension": "segment", "segment": "paid"}
+
+
+def test_series_window_limits_baseline():
+    from panels import make_series
+    r = client.post("/investigate/series",
+                    files={"series": ("series.csv", _csv(make_series()), "text/csv")},
+                    data={"window": "3"})
+    assert r.json()["verdict"] == "ASSERT"
+
+
+def test_series_requires_period_column():
+    from panels import BASELINE
+    r = client.post("/investigate/series", files={
+        "series": ("series.csv", _csv(BASELINE), "text/csv"),
+    })
+    assert r.status_code == 400
+    assert "period" in r.json()["detail"]
+
+
+# ------------------------------------------------------------- spéculations
+def test_speculations_only_on_assert():
+    assert_body = client.post("/investigate", json={"panel": "clean"}).json()
+    abstain_body = client.post("/investigate", json={"panel": "diffuse"}).json()
+    assert len(assert_body["speculations"]) >= 1
+    assert abstain_body["speculations"] == []
