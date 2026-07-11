@@ -12,6 +12,8 @@
 data/
 tests/
 scripts/
+examples/
+.github/
 .git/
 .claude/
 .gitignore

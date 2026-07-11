@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>prove-or-abstain</title>
+<style>
+  :root {
+    --bg: #f8fafc; --card: #ffffff; --ink: #0f172a; --muted: #64748b;
+    --line: #e2e8f0; --indigo: #4f46e5; --green: #16a34a; --green-bg: #f0fdf4;
+    --red: #dc2626; --red-bg: #fef2f2; --amber: #b45309; --amber-bg: #fffbeb;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 880px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 10px; padding: 20px; margin-bottom: 20px;
+  }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  button {
+    font: inherit; padding: 8px 18px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--indigo); background: var(--indigo); color: #fff;
+  }
+  button.secondary { background: #fff; color: var(--indigo); }
+  button:disabled { opacity: .5; cursor: wait; }
+  label.toggle { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); margin-left: auto; }
+  .divider { border-top: 1px solid var(--line); margin: 18px 0 14px; }
+  .hint { color: var(--muted); font-size: 13px; margin: 6px 0 10px; }
+  input[type=file] { font-size: 13px; max-width: 260px; }
+  #error { color: var(--red); margin: 8px 0 0; white-space: pre-wrap; display: none; }
+
+  #result { display: none; }
+  .verdict-row { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+  .badge { font-size: 22px; font-weight: 700; padding: 6px 18px; border-radius: 8px; }
+  .badge.assert { color: var(--green); background: var(--green-bg); border: 1.5px solid var(--green); }
+  .badge.abstain { color: var(--red); background: var(--red-bg); border: 1.5px solid var(--red); }
+  .badge.none { color: var(--muted); background: var(--bg); border: 1.5px solid var(--line); }
+  .meta { color: var(--muted); }
+  .meta b { color: var(--ink); }
+
+  .gates { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 14px 0; }
+  .gate { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .gate h3 { margin: 0 0 6px; font-size: 14px; display: flex; justify-content: space-between; }
+  .gate .v { font-weight: 700; }
+  .gate.assert { border-color: var(--green); background: var(--green-bg); }
+  .gate.assert .v { color: var(--green); }
+  .gate.abstain { border-color: var(--red); background: var(--red-bg); }
+  .gate.abstain .v { color: var(--red); }
+  .gate ul { margin: 4px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
+  .gate .nums { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+
+  .action { border-left: 3px solid var(--amber); background: var(--amber-bg); padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 14px 0; }
+  .action b { color: var(--amber); }
+  .report { font-style: italic; color: var(--ink); margin: 14px 0; }
+  details { margin-top: 14px; }
+  summary { cursor: pointer; color: var(--muted); }
+  .trace { font: 12.5px/1.6 ui-monospace, Menlo, monospace; color: var(--muted); margin: 8px 0 0; padding-left: 18px; }
+  footer { color: var(--muted); font-size: 13px; margin-top: 28px; }
+  footer a { color: var(--indigo); }
+</style>
+</head>
+<body>
+<main>
+  <h1>prove-or-abstain</h1>
+  <p class="sub">A causal investigation agent that asserts a root cause only when the math proves it — and abstains otherwise.</p>
+
+  <div class="card">
+    <div class="row">
+      <button onclick="runPanel('clean')">clean</button>
+      <button onclick="runPanel('diffuse')">diffuse</button>
+      <button onclick="runPanel('mixshift')">mixshift</button>
+      <label class="toggle"><input type="checkbox" id="autopilot"> autopilot</label>
+    </div>
+    <p class="hint">clean: one segment collapses &rarr; expect ASSERT &nbsp;·&nbsp; diffuse: uniform drop &rarr; ABSTAIN &nbsp;·&nbsp; mixshift: mix and rates entangled &rarr; ABSTAIN</p>
+    <div class="divider"></div>
+    <p class="hint">Or investigate your own data — two CSVs with columns <code>metric, &lt;dimensions...&gt;, n, c</code> (see <code>examples/</code>):</p>
+    <div class="row">
+      <input type="file" id="baseline" accept=".csv"> <span class="hint">baseline</span>
+      <input type="file" id="current" accept=".csv"> <span class="hint">current</span>
+      <button class="secondary" onclick="runUpload()">investigate CSV</button>
+    </div>
+    <p id="error"></p>
+  </div>
+
+  <div class="card" id="result">
+    <div class="verdict-row">
+      <span class="badge" id="verdict"></span>
+      <span class="meta" id="confidence"></span>
+      <span class="meta" id="rootcause"></span>
+    </div>
+    <div class="gates" id="gates"></div>
+    <div class="action" id="action"></div>
+    <p class="report" id="report"></p>
+    <details><summary>investigation trace</summary><ol class="trace" id="trace"></ol></details>
+  </div>
+
+  <footer>
+    Every number comes from pandas/numpy; the LLM only orders the dimensions to try and phrases the report.
+    <a href="/docs">API docs</a>
+  </footer>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+
+function setBusy(b) { document.querySelectorAll('button').forEach(x => x.disabled = b); }
+
+function fail(msg) { $('error').style.display = 'block'; $('error').textContent = msg; }
+
+async function call(url, opts) {
+  $('error').style.display = 'none';
+  setBusy(true);
+  try {
+    const r = await fetch(url, opts);
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.detail ? JSON.stringify(body.detail) : r.statusText);
+    render(body);
+  } catch (e) {
+    fail(e.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function runPanel(panel) {
+  call('/investigate', {
+    method: 'POST',
+    headers: {'content-type': 'application/json'},
+    body: JSON.stringify({panel, autopilot: $('autopilot').checked}),
+  });
+}
+
+function runUpload() {
+  const base = $('baseline').files[0], curr = $('current').files[0];
+  if (!base || !curr) return fail('Select both a baseline CSV and a current CSV.');
+  const fd = new FormData();
+  fd.append('baseline', base);
+  fd.append('current', curr);
+  fd.append('autopilot', $('autopilot').checked);
+  call('/investigate/upload', {method: 'POST', body: fd});
+}
+
+function render(b) {
+  $('result').style.display = 'block';
+
+  const v = b.verdict || 'NO_ANOMALY';
+  $('verdict').textContent = v;
+  $('verdict').className = 'badge ' + (v === 'ASSERT' ? 'assert' : v === 'ABSTAIN' ? 'abstain' : 'none');
+  $('confidence').innerHTML = b.confidence != null ? `confidence <b>${b.confidence.toFixed(2)}</b>` : '';
+  $('rootcause').innerHTML = b.root_cause
+    ? `root cause <b>${b.root_cause.dimension} = ${b.root_cause.segment}</b>`
+    : (v === 'ABSTAIN' ? 'no localized cause' : '');
+
+  const gates = $('gates');
+  gates.innerHTML = '';
+  for (const [dim, g] of Object.entries(b.gates || {})) {
+    const el = document.createElement('div');
+    el.className = 'gate ' + g.verdict.toLowerCase();
+    el.innerHTML =
+      `<h3><span>dimension: ${dim}</span><span class="v">${g.verdict}</span></h3>
+       <ul>${g.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
+       <div class="nums">leader: ${g.leading_segment ?? '—'} · concentration ${g.concentration.toFixed(2)}
+         · interaction ${g.interaction_share.toFixed(2)} · n ${g.leading_sample_n ?? '—'}</div>`;
+    gates.appendChild(el);
+  }
+
+  $('action').style.display = b.action ? 'block' : 'none';
+  if (b.action) $('action').innerHTML = `<b>${b.action.kind}</b> — ${b.action.detail}`;
+
+  $('report').textContent = b.report || '';
+  $('trace').innerHTML = (b.trace || []).map(t => `<li>${t}</li>`).join('');
+}
+</script>
+</body>
+</html>
