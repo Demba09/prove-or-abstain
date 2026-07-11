@@ -1,0 +1,17 @@
+metric,segment,device,n,c
+conversion,organic,mobile,5000,250
+activation,organic,mobile,5000,1500
+conversion,organic,desktop,5000,250
+activation,organic,desktop,5000,1500
+conversion,paid,mobile,3000,150
+activation,paid,mobile,3000,960
+conversion,paid,desktop,3000,150
+activation,paid,desktop,3000,960
+conversion,referral,mobile,1500,120
+activation,referral,mobile,1500,420
+conversion,referral,desktop,1500,120
+activation,referral,desktop,1500,420
+conversion,email,mobile,500,60
+activation,email,mobile,500,175
+conversion,email,desktop,500,60
+activation,email,desktop,500,175

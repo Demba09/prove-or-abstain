@@ -1,5 +1,7 @@
 # prove-or-abstain
 
+![CI](https://github.com/Demba09/prove-or-abstain/actions/workflows/ci.yml/badge.svg)
+
 A causal investigation agent for product metrics. Given a baseline period and
 a current period, it determines whether a metric moved materially, tests which
 segment explains the move, and returns one of two verdicts:
@@ -65,6 +67,12 @@ export QWEN_MOCK=1        # run offline; omit if DASHSCOPE_API_KEY is set
 pytest -q                 # math vs. oracle, gate verdicts, API behaviour
 
 uvicorn api.app:app --reload
+```
+
+Open http://localhost:8000 for the demo page — run the built-in scenarios or
+upload your own CSVs — or use the API directly:
+
+```bash
 curl -X POST localhost:8000/investigate \
   -H 'content-type: application/json' -d '{"panel":"clean"}'
 ```
@@ -72,11 +80,14 @@ curl -X POST localhost:8000/investigate \
 ## API
 
 ```
+GET  /                     demo page
 POST /investigate
   body:   { "panel": "clean" | "diffuse" | "mixshift", "autopilot": false }
   return: { verdict, confidence, root_cause, gates, action, report, trace }
-
-GET /health
+POST /investigate/upload
+  multipart: baseline=<csv>, current=<csv>, autopilot=<bool>
+  same return shape
+GET  /health
 ```
 
 The endpoint builds the initial state, runs the graph, and serializes the
@@ -96,6 +107,25 @@ Three built-in panels cover the three interesting outcomes:
 With autopilot on (`"autopilot": true`), an ASSERT with confidence ≥ 0.70
 returns an `EXECUTE` action instead of a recommendation. An ABSTAIN never
 executes, regardless of flags; the test suite enforces this.
+
+### Bring your own data
+
+`POST /investigate/upload` takes two CSVs in long panel format — one row per
+(metric, segment...) cell, with raw counts:
+
+```
+metric, <dim1>, [<dim2>, ...], n, c
+```
+
+`n` is the cell's population, `c` the numerator (conversions, churned users,
+…). Dimension columns are inferred: everything except `metric`, `n`, `c`.
+Sample files live in `examples/`:
+
+```bash
+curl -X POST localhost:8000/investigate/upload \
+  -F baseline=@examples/baseline.csv \
+  -F current=@examples/current_clean.csv
+```
 
 ## Attribution math
 

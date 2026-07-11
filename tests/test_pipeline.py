@@ -98,3 +98,57 @@ def test_autopilot_executes_on_proof():
 
 def test_unknown_panel_rejected():
     assert client.post("/investigate", json={"panel": "bogus"}).status_code == 422
+
+
+# ---------------------------------------------------------- page de démo
+def test_home_serves_demo_page():
+    r = client.get("/")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    assert "prove-or-abstain" in r.text
+
+
+# ------------------------------------------------------------ upload CSV
+def _csv(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False).encode()
+
+
+def test_upload_roundtrip_matches_panels():
+    from panels import BASELINE, CLEAN, DIFFUSE
+    for curr, want in [(CLEAN, "ASSERT"), (DIFFUSE, "ABSTAIN")]:
+        r = client.post("/investigate/upload", files={
+            "baseline": ("baseline.csv", _csv(BASELINE), "text/csv"),
+            "current": ("current.csv", _csv(curr), "text/csv"),
+        })
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["panel"] == "upload" and body["verdict"] == want
+
+
+def test_upload_clean_localizes_paid():
+    from panels import BASELINE, CLEAN
+    body = client.post("/investigate/upload", files={
+        "baseline": ("baseline.csv", _csv(BASELINE), "text/csv"),
+        "current": ("current.csv", _csv(CLEAN), "text/csv"),
+    }).json()
+    assert body["root_cause"] == {"dimension": "segment", "segment": "paid"}
+
+
+def test_upload_rejects_missing_column():
+    from panels import BASELINE, CLEAN
+    r = client.post("/investigate/upload", files={
+        "baseline": ("baseline.csv", _csv(BASELINE.drop(columns=["n"])), "text/csv"),
+        "current": ("current.csv", _csv(CLEAN), "text/csv"),
+    })
+    assert r.status_code == 400
+    assert "missing required column" in r.json()["detail"]
+
+
+def test_upload_rejects_mismatched_columns():
+    from panels import BASELINE, CLEAN
+    r = client.post("/investigate/upload", files={
+        "baseline": ("baseline.csv", _csv(BASELINE), "text/csv"),
+        "current": ("current.csv", _csv(CLEAN.rename(columns={"device": "browser"})), "text/csv"),
+    })
+    assert r.status_code == 400
+    assert "same columns" in r.json()["detail"]
