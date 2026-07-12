@@ -1,18 +1,19 @@
-"""FastAPI surface : wrapper mince autour du graph LangGraph.
+"""FastAPI surface: a thin wrapper around the LangGraph graph.
 
-GET  /                    -> page de démo statique (api/static/index.html)
-POST /investigate         -> { panel: "clean"|"diffuse"|"mixshift", autopilot?: bool }
-POST /investigate/upload  -> multipart : baseline.csv + current.csv (+ autopilot)
-GET  /health              -> healthcheck pour Docker / Alibaba Cloud
+GET  /                    -> static demo page (api/static/index.html)
+POST /investigate         -> { panel: "clean"|"diffuse"|"mixshift"|"deep", autopilot?: bool }
+POST /investigate/upload  -> multipart: baseline.csv + current.csv (+ autopilot, sum_metrics)
+POST /investigate/series  -> multipart: one multi-period CSV (+ window, autopilot, sum_metrics)
+GET  /health              -> healthcheck for Docker / Alibaba Cloud
 
-Les deux endpoints d'investigation construisent l'état initial, appellent
-graph.invoke(state) et sérialisent l'AgentState final (verdict ASSERT/ABSTAIN,
-gates par dimension, root cause, rapport, trace). Aucune logique métier ici —
-tout est dans les nodes.
+Both investigation endpoints build the initial state, call
+graph.invoke(state) and serialize the final AgentState (ASSERT/ABSTAIN
+verdict, per-dimension gates, root cause, drill-down, report, trace).
+No business logic lives here — everything is in the nodes.
 
-Format CSV attendu (panel long, mêmes colonnes que panels.py) :
+Expected CSV format (long panel, same columns as panels.py):
     metric, <dim1>, [<dim2>, ...], n, c
-Les dimensions sont inférées : toutes les colonnes sauf {metric, n, c}.
+Dimensions are inferred: every column except {metric, n, c, period}.
 
 Run: uvicorn api.app:app --reload
 """
@@ -32,29 +33,29 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-load_dotenv()  # local : lit .env ; en conteneur le fichier est absent (.dockerignore)
-               # et les variables injectées au runtime priment.
+load_dotenv()  # local: reads .env; in the container the file is absent
+               # (.dockerignore) and runtime-injected variables win anyway.
 
 from graph import APP as INVESTIGATION_GRAPH
 from panels import BASELINE, CLEAN, DEEP, DIFFUSE, MIXSHIFT, split_series
 
 app = FastAPI(title="prove-or-abstain", version="0.4.0")
 
-# Les quatre panels de démo : CLEAN/DEEP -> ASSERT, DIFFUSE/MIXSHIFT -> ABSTAIN.
+# The four demo panels: CLEAN/DEEP -> ASSERT, DIFFUSE/MIXSHIFT -> ABSTAIN.
 _PANELS = {"clean": CLEAN, "diffuse": DIFFUSE, "mixshift": MIXSHIFT, "deep": DEEP}
 _STATIC = Path(__file__).parent / "static"
-_REQUIRED = {"metric", "n", "c"}             # colonnes obligatoires d'un panel long
-_RESERVED = _REQUIRED | {"period"}           # colonnes non-dimension
+_REQUIRED = {"metric", "n", "c"}             # mandatory long-panel columns
+_RESERVED = _REQUIRED | {"period"}           # non-dimension columns
 
 
 class InvestigateRequest(BaseModel):
     panel: Literal["clean", "diffuse", "mixshift", "deep"] = "clean"
-    autopilot: bool = False   # ne prend effet que sur ASSERT + confiance >= 0.70
+    autopilot: bool = False   # only takes effect on ASSERT + confidence >= 0.70
 
 
 def _jsonable(v):
-    """Aplati les types numpy/NaN d'un état final vers du JSON strict —
-    nécessaire dès que les panels viennent d'un CSV utilisateur."""
+    """Flatten numpy scalars / NaN in a final state down to strict JSON —
+    necessary as soon as the panels come from a user CSV."""
     if isinstance(v, dict):
         return {k: _jsonable(x) for k, x in v.items()}
     if isinstance(v, (list, tuple)):
@@ -145,8 +146,8 @@ def _read_panel(upload: UploadFile, name: str) -> pd.DataFrame:
 
 
 def _parse_kinds(sum_metrics: str, metrics: list[str]) -> dict:
-    """Champ de formulaire 'sum_metrics' : noms (séparés par des virgules) des
-    métriques de type SOMME (revenu...). Les autres restent des taux."""
+    """Form field 'sum_metrics': comma-separated names of the SUM-kind
+    metrics (revenue...). Everything else stays a rate."""
     kinds = {}
     for name in (s.strip() for s in sum_metrics.split(",") if s.strip()):
         if name not in metrics:
@@ -181,9 +182,9 @@ def investigate_series(series: UploadFile = File(...),
                        window: int | None = Form(None),
                        autopilot: bool = Form(False),
                        sum_metrics: str = Form("")) -> dict:
-    """Un seul CSV multi-périodes (colonne 'period'). La dernière période est
-    investiguée contre une baseline glissante : les `window` périodes
-    précédentes poolées (toutes si window absent)."""
+    """One multi-period CSV (a 'period' column). The last period is
+    investigated against a rolling baseline: the preceding `window`
+    periods pooled together (all of them if window is absent)."""
     panel = _read_panel(series, "series")
     if "period" not in panel.columns:
         raise HTTPException(400, "series: missing required column 'period'")

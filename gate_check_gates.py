@@ -1,9 +1,9 @@
 """
-gate_check_gates.py — ferme la sous-étape "décision" de Phase 1.
+gate_check_gates.py — validates the decision layer (the gates).
 
-  CLEAN    -> ASSERT  (une cause localisée : paid décroche seul)
-  DIFFUSE  -> ABSTAIN (baisse uniforme, aucun coupable)
-  MIXSHIFT -> ABSTAIN (mix + taux bougent partout, pas de coupable net)
+  CLEAN    -> ASSERT  (one localized cause: paid breaks alone)
+  DIFFUSE  -> ABSTAIN (uniform drop, no culprit)
+  MIXSHIFT -> ABSTAIN (mix + rates both move, no clean culprit)
 """
 import pandas as pd
 from attribution_reference import BASELINE, CLEAN, DIFFUSE, aggregate
@@ -27,14 +27,14 @@ for name, curr in [("CLEAN", CLEAN), ("DIFFUSE", DIFFUSE), ("MIXSHIFT", MIXSHIFT
     rep = evaluate_gates(agg, out, baseline_n=baseline_n)
     ok = rep.verdict == expected[name]
     all_ok &= ok
-    print(f"\n=== {name} ===  attendu {expected[name]} -> {rep.verdict}  {'OK' if ok else 'XX'}")
-    print(f"  segment meneur   : {rep.leading_segment}")
+    print(f"\n=== {name} ===  expected {expected[name]} -> {rep.verdict}  {'OK' if ok else 'XX'}")
+    print(f"  leading segment  : {rep.leading_segment}")
     print(f"  concentration    : {rep.concentration:.3f}")
     print(f"  interaction_share: {rep.interaction_share:.3f}")
-    print(f"  n meneur         : {rep.leading_sample_n:.0f}")
-    print(f"  test z meneur    : z={rep.leading_z:+.2f}, p={rep.leading_p:.4f}")
-    print(f"  ΔR relatif       : {rep.delta_R_relative:.1%}")
-    print(f"  confiance        : {rep.confidence:.3f}")
-    print(f"  raisons          : {rep.reasons}")
+    print(f"  leader n         : {rep.leading_sample_n:.0f}")
+    print(f"  leader z-test    : z={rep.leading_z:+.2f}, p={rep.leading_p:.4f}")
+    print(f"  relative ΔR      : {rep.delta_R_relative:.1%}")
+    print(f"  confidence       : {rep.confidence:.3f}")
+    print(f"  reasons          : {rep.reasons}")
 
-print("\nSous-étape décision CLOSE \u2713" if all_ok else "\nPAS ENCORE \u2014 ajuste et relance.")
+print("\nDecision layer VALIDATED ✓" if all_ok else "\nNOT YET — tune and rerun.")

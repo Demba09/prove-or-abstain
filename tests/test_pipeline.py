@@ -1,8 +1,8 @@
-"""Filet de sécurité de la démo : math, gates et API sur les trois panels.
+"""Demo safety net: math, gates and API across the built-in panels.
 
-Si CLEAN cesse de localiser, si DIFFUSE/MIXSHIFT cessent d'être rejetés, ou si
-l'ABSTAIN se met à exécuter une action, ces tests cassent avant que ça
-n'atteigne les juges.
+If CLEAN stops localizing, if DIFFUSE/MIXSHIFT stop being rejected, or if
+ABSTAIN ever starts executing an action, these tests break before that
+reaches the judges.
 
 Run: pytest -q
 """
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 
-os.environ["QWEN_MOCK"] = "1"   # avant tout import qui instancie le client LLM
+os.environ["QWEN_MOCK"] = "1"   # before any import that instantiates the LLM client
 
 import numpy as np
 import pandas as pd
@@ -23,7 +23,8 @@ from attribution_reference import (BASELINE as REF_BASELINE, CLEAN as REF_CLEAN,
 from gates import evaluate_gates
 from metrics import aggregate
 
-# Même MIXSHIFT que gate_check.py : n ET r bougent -> rate, mix, interaction non nuls.
+# Same MIXSHIFT as gate_check.py: n AND r both move -> rate, mix, interaction
+# all non-zero.
 REF_MIXSHIFT = pd.DataFrame([
     {"segment": "organic",  "n": 14000, "c": 630},
     {"segment": "paid",     "n": 4000,  "c": 320},
@@ -37,7 +38,7 @@ EXPECTED = {"CLEAN": "ASSERT", "DIFFUSE": "ABSTAIN", "MIXSHIFT": "ABSTAIN"}
 client = TestClient(app)
 
 
-# ------------------------------------------------------------------ la math
+# -------------------------------------------------------------------- math
 def test_decompose_matches_oracle():
     cols = ["rate", "mix", "interaction", "contribution"]
     for curr in SCENARIOS.values():
@@ -52,7 +53,7 @@ def test_decompose_zero_residual():
         assert abs(agg["residual"]) < 1e-10
 
 
-# ----------------------------------------------------------------- les gates
+# ------------------------------------------------------------------- gates
 def test_gates_verdicts():
     baseline_n = REF_BASELINE.set_index("segment")["n"]
     for name, curr in SCENARIOS.items():
@@ -61,7 +62,7 @@ def test_gates_verdicts():
         assert rep.verdict == EXPECTED[name], f"{name}: {rep.reasons}"
 
 
-# ------------------------------------------------------------------- l'API
+# --------------------------------------------------------------------- API
 def test_health():
     r = client.get("/health")
     assert r.status_code == 200 and r.json() == {"status": "ok"}
@@ -77,12 +78,12 @@ def test_investigate_verdicts():
 def test_clean_localizes_paid_after_loop():
     body = client.post("/investigate", json={"panel": "clean"}).json()
     assert body["root_cause"] == {"dimension": "segment", "segment": "paid"}
-    # la boucle a bien tourné : device essayé (et rejeté) avant segment
+    # the loop really ran: device was tried (and rejected) before segment
     assert body["gates"]["device"]["verdict"] == "ABSTAIN"
 
 
 def test_abstain_never_executes():
-    # LA propriété de sûreté : même autopilot ON, un ABSTAIN n'exécute jamais.
+    # THE safety property: even with autopilot ON, an ABSTAIN never executes.
     for panel in ("diffuse", "mixshift"):
         body = client.post("/investigate", json={"panel": panel,
                                                  "autopilot": True}).json()
@@ -100,7 +101,7 @@ def test_unknown_panel_rejected():
     assert client.post("/investigate", json={"panel": "bogus"}).status_code == 422
 
 
-# ---------------------------------------------------------- page de démo
+# --------------------------------------------------------------- demo page
 def test_home_serves_demo_page():
     r = client.get("/")
     assert r.status_code == 200
@@ -108,7 +109,7 @@ def test_home_serves_demo_page():
     assert "prove-or-abstain" in r.text
 
 
-# ------------------------------------------------------------ upload CSV
+# -------------------------------------------------------------- CSV upload
 def _csv(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode()
 
@@ -154,18 +155,18 @@ def test_upload_rejects_mismatched_columns():
     assert "same columns" in r.json()["detail"]
 
 
-# ------------------------------------------------- gate de significativité
+# --------------------------------------------------------- significance gate
 def test_significance_gate_rejects_small_samples():
-    # Mêmes taux que CLEAN mais n divisé par 100 : la concentration est
-    # parfaite, pourtant le mouvement n'est plus significatif -> ABSTAIN.
-    # C'est exactement ce qu'un plancher n>=1000 ne savait pas expliquer.
+    # Same rates as CLEAN but n divided by 100: the concentration is perfect,
+    # yet the move is no longer significant -> ABSTAIN.
+    # This is exactly what an n>=1000 floor could not explain.
     scale = 100
     small_base = REF_BASELINE.assign(n=REF_BASELINE.n // scale, c=REF_BASELINE.c // scale)
     small_curr = REF_CLEAN.assign(n=REF_CLEAN.n // scale, c=REF_CLEAN.c // scale)
     out = decompose(small_base, small_curr, dims="segment")
     rep = evaluate_gates(aggregate(out), out)
     assert rep.verdict == "ABSTAIN"
-    assert any("non significatif" in r for r in rep.reasons)
+    assert any("not significant" in r for r in rep.reasons)
 
 
 def test_significance_gate_passes_on_clean():
@@ -175,7 +176,7 @@ def test_significance_gate_passes_on_clean():
     assert rep.leading_p < 0.01 and abs(rep.leading_z) > 2.576
 
 
-# --------------------------------------------------------- métriques somme
+# --------------------------------------------------------------- sum metrics
 def test_decompose_sum_exact():
     from attribution import decompose_sum
     base = pd.DataFrame([{"segment": "a", "n": 100, "c": 2000},
@@ -183,7 +184,7 @@ def test_decompose_sum_exact():
     curr = pd.DataFrame([{"segment": "a", "n": 120, "c": 1800},
                          {"segment": "b", "n": 50, "c": 2500}])
     out = decompose_sum(base, curr, dims="segment")
-    # contribution_s == c1 - c0, et somme == ΔV, résidu nul
+    # contribution_s == c1 - c0, their sum == ΔV, zero residual
     assert np.allclose(out["contribution"], out["c1"] - out["c0"])
     agg = aggregate(out)
     assert abs(agg["residual"]) < 1e-9
@@ -200,7 +201,7 @@ def test_sum_metric_upload_asserts():
     assert body["root_cause"] == {"dimension": "segment", "segment": "paid"}
 
 
-# --------------------------------------------------------------- drill-down
+# ---------------------------------------------------------------- drill-down
 def test_deep_panel_drills_down():
     body = client.post("/investigate", json={"panel": "deep"}).json()
     assert body["verdict"] == "ASSERT"
@@ -211,8 +212,8 @@ def test_deep_panel_drills_down():
 
 
 def test_clean_panel_does_not_refine():
-    # paid est réparti 50/50 mobile/desktop : rien à affiner, et le driller
-    # doit le dire au lieu d'inventer une sous-cause.
+    # paid is split 50/50 mobile/desktop: nothing to refine, and the driller
+    # must say so instead of inventing a sub-cause.
     body = client.post("/investigate", json={"panel": "clean"}).json()
     assert body["verdict"] == "ASSERT"
     assert body["drilldown"]["refined"] is None
@@ -223,7 +224,7 @@ def test_abstain_has_no_drilldown():
     assert body["drilldown"] is None
 
 
-# ---------------------------------------------------------- série temporelle
+# ----------------------------------------------------------------- time series
 def test_series_endpoint_rolling_baseline():
     from panels import make_series
     r = client.post("/investigate/series", files={
@@ -243,6 +244,15 @@ def test_series_window_limits_baseline():
     assert r.json()["verdict"] == "ASSERT"
 
 
+def test_series_rejects_bad_window():
+    from panels import make_series
+    r = client.post("/investigate/series",
+                    files={"series": ("series.csv", _csv(make_series()), "text/csv")},
+                    data={"window": "0"})
+    assert r.status_code == 400
+    assert "window" in r.json()["detail"]
+
+
 def test_series_requires_period_column():
     from panels import BASELINE
     r = client.post("/investigate/series", files={
@@ -252,7 +262,7 @@ def test_series_requires_period_column():
     assert "period" in r.json()["detail"]
 
 
-# ------------------------------------------------------------- spéculations
+# --------------------------------------------------------------- speculation
 def test_speculations_only_on_assert():
     assert_body = client.post("/investigate", json={"panel": "clean"}).json()
     abstain_body = client.post("/investigate", json={"panel": "diffuse"}).json()

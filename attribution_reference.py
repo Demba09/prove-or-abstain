@@ -1,12 +1,13 @@
 """
-attribution_reference.py — ORACLE de référence pour Probatio (Phase 0).
+attribution_reference.py — reference ORACLE for Probatio.
 
-But : implémentation vérifiée de la décomposition rate/mix/interaction.
-Tu écris TA version (signature identique) et tu la compares à celle-ci avec
-`assert_matches`. Tant que le résidu n'est pas ~0 et que tes contributions
-ne collent pas à l'oracle, Phase 0 n'est pas franchie.
+Purpose: an independently written, verified implementation of the
+rate/mix/interaction decomposition. The production version (attribution.py,
+identical signature) is diffed against this one in gate_check.py and in the
+test suite. As long as the residual is not ~0 and the contributions do not
+match the oracle, the math layer is not trusted.
 
-Convention : counts bruts primaires, taux TOUJOURS dérivés. Le LLM ne calcule rien ici.
+Convention: raw counts are primary, rates are ALWAYS derived. No LLM here.
 """
 import numpy as np
 import pandas as pd
@@ -14,27 +15,27 @@ import pandas as pd
 
 def decompose(base: pd.DataFrame, curr: pd.DataFrame, dims, n_col="n", c_col="c") -> pd.DataFrame:
     """
-    base, curr : panels avec colonnes [*dims, n_col, c_col] (counts bruts).
-    Retourne un DataFrame indexé par segment avec w0,w1,r0,r1 et
-    les contributions rate/mix/interaction + contribution totale.
+    base, curr: panels with columns [*dims, n_col, c_col] (raw counts).
+    Returns a DataFrame indexed by segment with w0,w1,r0,r1 and the
+    rate/mix/interaction contributions + total contribution.
 
-    Identité exacte :  w1*r1 - w0*r0 = w0*dr + r0*dw + dw*dr
+    Exact identity:  w1*r1 - w0*r0 = w0*dr + r0*dw + dw*dr
     """
     b = base.set_index(dims if isinstance(dims, list) else [dims])
     c = curr.set_index(dims if isinstance(dims, list) else [dims])
-    idx = b.index.union(c.index)                      # segments présents dans l'un OU l'autre
+    idx = b.index.union(c.index)                      # segments in either panel
     b = b.reindex(idx, fill_value=0)
     c = c.reindex(idx, fill_value=0)
 
     N0, N1 = b[n_col].sum(), c[n_col].sum()
-    w0, w1 = b[n_col] / N0, c[n_col] / N1             # parts de mix
-    r0 = (b[c_col] / b[n_col]).replace([np.inf, -np.inf], 0).fillna(0)   # taux dérivés
+    w0, w1 = b[n_col] / N0, c[n_col] / N1             # mix shares
+    r0 = (b[c_col] / b[n_col]).replace([np.inf, -np.inf], 0).fillna(0)   # derived rates
     r1 = (c[c_col] / c[n_col]).replace([np.inf, -np.inf], 0).fillna(0)
 
     dw, dr = w1 - w0, r1 - r0
-    rate = w0 * dr                                    # mix figé au baseline
-    mix = r0 * dw                                     # taux figé au baseline
-    interaction = dw * dr                             # part entremêlée
+    rate = w0 * dr                                    # mix frozen at baseline
+    mix = r0 * dw                                     # rate frozen at baseline
+    interaction = dw * dr                             # entangled share
 
     out = pd.DataFrame({"w0": w0, "w1": w1, "r0": r0, "r1": r1,
                         "rate": rate, "mix": mix, "interaction": interaction})
@@ -56,18 +57,19 @@ def aggregate(out: pd.DataFrame) -> dict:
 
 
 def assert_matches(candidate_out: pd.DataFrame, dims, tol=1e-10):
-    """Branche TA version ici : vérifie résidu nul + cohérence colonne par colonne."""
+    """Plug a candidate implementation here: checks zero residual + column
+    consistency."""
     agg = aggregate(candidate_out)
-    assert abs(agg["residual"]) < tol, f"résidu non nul : {agg['residual']:.3e}"
+    assert abs(agg["residual"]) < tol, f"non-zero residual: {agg['residual']:.3e}"
     recomposed = candidate_out["rate"] + candidate_out["mix"] + candidate_out["interaction"]
-    assert np.allclose(recomposed, candidate_out["contribution"], atol=tol), "contributions incohérentes"
+    assert np.allclose(recomposed, candidate_out["contribution"], atol=tol), "inconsistent contributions"
     return agg
 
 
 # ----------------------------------------------------------------------
-# Données de démo : MÊME ΔR agrégé, structure d'attribution OPPOSÉE.
+# Demo data: SAME aggregate ΔR, OPPOSITE attribution structure.
 # ----------------------------------------------------------------------
-def _panel(rows, dims=("segment",)):
+def _panel(rows):
     return pd.DataFrame(rows)
 
 
@@ -78,7 +80,7 @@ BASELINE = _panel([
     {"segment": "email",    "n": 1000,  "c": 120},   # 12.0%
 ])
 
-# CLEAN : un seul segment décroche (paid 7.0% -> 5.0%), mix stable.
+# CLEAN: a single segment breaks (paid 7.0% -> 5.0%), stable mix.
 CLEAN = _panel([
     {"segment": "organic",  "n": 10000, "c": 500},
     {"segment": "paid",     "n": 6000,  "c": 300},
@@ -86,7 +88,7 @@ CLEAN = _panel([
     {"segment": "email",    "n": 1000,  "c": 120},
 ])
 
-# DIFFUSE : tous les taux baissent de ~0.6pp, mix stable. MÊME ΔR global.
+# DIFFUSE: every rate drops ~0.6pp, stable mix. SAME aggregate ΔR.
 DIFFUSE = _panel([
     {"segment": "organic",  "n": 10000, "c": 440},   # 5.0 -> 4.4
     {"segment": "paid",     "n": 6000,  "c": 384},   # 7.0 -> 6.4
@@ -96,10 +98,10 @@ DIFFUSE = _panel([
 
 
 def _abstain_signal(agg, out):
-    """Heuristique illustrative : qui domine l'attribution ?"""
+    """Illustrative heuristic: who dominates the attribution?"""
     top = out.contribution.abs().max()
     total = out.contribution.abs().sum()
-    concentration = top / total if total else 0          # 1 = un seul coupable
+    concentration = top / total if total else 0          # 1 = a single culprit
     inter_share = abs(agg["interaction"]) / (abs(agg["rate"]) + abs(agg["mix"]) + 1e-12)
     return concentration, inter_share
 
@@ -114,7 +116,7 @@ if __name__ == "__main__":
         print(out[["r0", "r1", "rate", "mix", "interaction", "contribution"]])
         print(f"\n  R0={agg['R0']:.4%}  R1={agg['R1']:.4%}  ΔR={agg['delta_R']:+.4%}")
         print(f"  rate={agg['rate']:+.5f}  mix={agg['mix']:+.5f}  interaction={agg['interaction']:+.5f}")
-        print(f"  Σcontrib={agg['sum_contrib']:+.5f}   RÉSIDU={agg['residual']:+.2e}")
-        print(f"  concentration top-segment={conc:.2f}   poids interaction={inter:.3f}")
-        verdict = "ASSERT (cause localisée)" if conc >= 0.55 else "ABSTAIN (cause diffuse)"
+        print(f"  Σcontrib={agg['sum_contrib']:+.5f}   RESIDUAL={agg['residual']:+.2e}")
+        print(f"  top-segment concentration={conc:.2f}   interaction weight={inter:.3f}")
+        verdict = "ASSERT (localized cause)" if conc >= 0.55 else "ABSTAIN (diffuse cause)"
         print(f"  => {verdict}")

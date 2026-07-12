@@ -1,12 +1,13 @@
 """
-agent_state.py — contrat d'état du graphe Probatio (Phase 1).
+agent_state.py — state contract of the Probatio graph.
 
-AgentState est un TypedDict : c'est le schéma que LangGraph fait circuler
-entre les nodes. Chaque node reçoit l'état courant et renvoie un dict partiel
-des clés qu'il modifie ; LangGraph fusionne.
+AgentState is a TypedDict: the schema LangGraph passes between the nodes.
+Each node receives the current state and returns a partial dict of the keys
+it changes; LangGraph merges.
 
-Aucun LLM ici (Phase 2). hypothesizer et reporter sont déterministes pour
-l'instant — le LLM viendra enrichir l'ordre des hypothèses et la rédaction.
+Design rule running through the whole architecture:
+    Numbers come from pandas/numpy. Never from the LLM.
+    The LLM prioritizes, phrases, and speculates (labelled). It does not compute.
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -19,7 +20,7 @@ from gates import GateReport
 
 @dataclass
 class MetricAnomaly:
-    """Une métrique dont le mouvement global dépasse le seuil de matérialité."""
+    """A metric whose aggregate move exceeds the materiality threshold."""
     metric: str
     R0: float
     R1: float
@@ -28,7 +29,7 @@ class MetricAnomaly:
 
 @dataclass
 class Action:
-    """Décision typée produite par l'actuator. L'ABSTAIN ne produit jamais EXECUTE."""
+    """Typed decision produced by the actuator. ABSTAIN never yields EXECUTE."""
     kind: str               # "EXECUTE" | "RECOMMEND" | "ESCALATE" | "NONE"
     metric: str
     dim: Optional[str] = None
@@ -37,40 +38,40 @@ class Action:
 
 
 class AgentState(TypedDict, total=False):
-    # --- entrées ---
-    baseline: pd.DataFrame          # panel long : [metric, *dims, n, c]
+    # --- inputs ---
+    baseline: pd.DataFrame          # long panel: [metric, *dims, n, c]
     current: pd.DataFrame
     metrics: list[str]
-    metric_kinds: dict              # metric -> "rate" (défaut) | "sum"
-    dims: list[str]                 # dimensions candidates, dans l'ordre d'essai
+    metric_kinds: dict              # metric -> "rate" (default) | "sum"
+    dims: list[str]                 # candidate dimensions, in trial order
     autopilot_enabled: bool
 
-    # --- détection ---
+    # --- detection ---
     anomalies: list[MetricAnomaly]
-    target_metric: str              # la métrique qu'on investigue
+    target_metric: str              # the metric under investigation
 
-    # --- boucle d'investigation ---
-    dims_to_try: list[str]          # file des dimensions restantes
+    # --- investigation loop ---
+    dims_to_try: list[str]          # queue of remaining dimensions
     iteration: int
     max_iterations: int
     current_dim: str
-    hypothesis: str                 # texte (déterministe en Phase 1)
-    dims_planned: bool              # le LLM a-t-il déjà ordonné les dimensions ?
-    investigation: dict             # {out, agg, baseline_n} pour la dim courante
-    gate_report: GateReport         # rapport de la dim courante
-    reports_by_dim: dict            # dim -> GateReport (toutes les dims essayées)
+    hypothesis: str                 # plain-text hypothesis for the current dim
+    dims_planned: bool              # has the LLM already ordered the dimensions?
+    investigation: dict             # {out, agg, kind} for the current dim
+    gate_report: GateReport         # current dimension's report
+    reports_by_dim: dict            # dim -> GateReport (every dim tried)
 
-    # --- verdict final ---
+    # --- final verdict ---
     verdict: str                    # "ASSERT" | "ABSTAIN" | "NO_ANOMALY"
     confidence: float
     winning_dim: Optional[str]
     winning_report: Optional[GateReport]
 
-    # --- drill-down (après ASSERT : affiner au sein du segment gagnant) ---
+    # --- drill-down (after ASSERT: refine within the winning segment) ---
     drilldown: Optional[dict]       # {parent, reports_by_dim, refined}
 
-    # --- sortie ---
+    # --- output ---
     actions: list[Action]
     report: str
-    speculations: list[str]         # hypothèses métier LLM, étiquetées spéculation
-    trace: list[str]                # journal lisible de l'investigation
+    speculations: list[str]         # LLM business hypotheses, labelled speculation
+    trace: list[str]                # readable investigation log

@@ -1,9 +1,9 @@
 """
-metrics.py — agrégation d'une décomposition.
+metrics.py — aggregation of a decomposition.
 
-aggregate() recompose les totaux R0/R1, somme les contributions et expose
-le résidu (doit être ~0). Sort la logique du fichier 'reference' (oracle)
-pour que le code de production n'en dépende pas.
+aggregate() recomposes the R0/R1 totals, sums the contributions and exposes
+the residual (must be ~0). Kept out of the 'reference' (oracle) file so that
+production code does not depend on it.
 """
 from __future__ import annotations
 import pandas as pd

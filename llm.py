@@ -1,17 +1,20 @@
 """
-llm.py — client Qwen/DashScope pour Probatio.
+llm.py — Qwen/DashScope client for Probatio.
 
-Frontière stricte (c'est la thèse du projet) : le LLM ne calcule rien et ne
-décide aucun verdict. Il fait exactement deux choses :
-  - plan_dimensions() : PROPOSER un ordre d'exploration des dimensions.
-    La math teste quand même toutes les dimensions ; l'ordre ne change donc
-    jamais le verdict final, seulement la vitesse à laquelle on le trouve.
-  - write_report() : RÉDIGER une conclusion à partir de chiffres DÉJÀ calculés.
-    On lui interdit explicitement d'inventer un chiffre ou une cause.
+Strict boundary (this is the project's thesis): the LLM computes nothing and
+decides no verdict. It does exactly three things:
+  - plan_dimensions() : PROPOSE an exploration order for the dimensions.
+    The math tests every dimension anyway, so the order never changes the
+    final verdict — only how fast it is found.
+  - write_report()    : PHRASE a conclusion from ALREADY COMPUTED numbers.
+    It is explicitly forbidden from inventing a figure or a cause.
+  - speculate_causes(): offer business hypotheses about the WHY, clearly
+    labelled as unverified speculation, kept apart from the proven verdict.
 
-Mode mock : si DASHSCOPE_API_KEY est absente ou QWEN_MOCK=1, on n'appelle pas
-le réseau et on renvoie des sorties déterministes — le pipeline tourne offline.
-Tout appel réel qui échoue retombe sur le fallback : l'agent ne crashe jamais.
+Mock mode: if DASHSCOPE_API_KEY is absent or QWEN_MOCK=1, no network call is
+made and deterministic outputs are returned — the pipeline runs offline.
+Any failed real call falls back to the deterministic output: the agent
+never crashes because of the LLM.
 """
 from __future__ import annotations
 import json
@@ -41,13 +44,13 @@ class QwenClient:
         self.mock = mock
         self._client = None
 
-    # --- bas niveau : un appel chat brut (import openai paresseux) ---
+    # --- low level: one raw chat call (lazy openai import) ---
     def complete(self, system: str, user: str,
                  temperature: float = 0.2, max_tokens: int = 400) -> str:
         if self.mock:
-            raise RuntimeError("complete() appelé en mode mock")
+            raise RuntimeError("complete() called in mock mode")
         if self._client is None:
-            from openai import OpenAI  # importé seulement si on appelle vraiment
+            from openai import OpenAI  # imported only when actually calling
             self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
         resp = self._client.chat.completions.create(
             model=self.model, temperature=temperature, max_tokens=max_tokens,
@@ -56,39 +59,39 @@ class QwenClient:
         )
         return (resp.choices[0].message.content or "").strip()
 
-    # --- usage 1 : proposer un ordre d'exploration (ne décide rien) ---
+    # --- use 1: propose an exploration order (decides nothing) ---
     def plan_dimensions(self, metric: str, delta_rel: float, dims: list[str]) -> list[str]:
         if self.mock:
             return list(dims)
         system = (
-            "Tu planifies une investigation causale sur une métrique business. "
-            "On te donne une métrique anormale et une liste de dimensions d'analyse. "
-            "Renvoie UNIQUEMENT un tableau JSON des mêmes dimensions, ré-ordonnées de "
-            "la plus susceptible de localiser la cause à la moins susceptible. "
-            "N'invente aucune dimension, n'en retire aucune, ne calcule rien."
+            "You are planning a causal investigation on a business metric. "
+            "You are given an anomalous metric and a list of analysis dimensions. "
+            "Return ONLY a JSON array of the same dimensions, reordered from the "
+            "most likely to localize the cause to the least likely. "
+            "Do not invent any dimension, do not drop any, do not compute anything."
         )
         user = json.dumps({"metric": metric, "delta_rel": round(delta_rel, 4),
                            "dimensions": list(dims)}, ensure_ascii=False)
         try:
             order = json.loads(_strip_fences(self.complete(system, user, max_tokens=120)))
-            order = [d for d in order if d in dims]          # garde-fou : sous-ensemble
-            order += [d for d in dims if d not in order]     # complète les oubliées
+            order = [d for d in order if d in dims]          # guard: subset only
+            order += [d for d in dims if d not in order]     # re-add anything dropped
             return order or list(dims)
         except Exception:
-            return list(dims)                                # fallback : ordre d'origine
+            return list(dims)                                # fallback: original order
 
-    # --- usage 3 : spéculer sur le POURQUOI métier (étiqueté, jamais mélangé
-    # au verdict prouvé ; ne calcule rien, ne décide rien) ---
+    # --- use 3: speculate about the business WHY (labelled, never mixed
+    # with the proven verdict; computes nothing, decides nothing) ---
     def speculate_causes(self, payload: dict) -> list[str]:
         if self.mock:
             return template_speculations(payload)
         system = (
-            "Une investigation causale a PROUVÉ qu'une variation de métrique se "
-            "localise sur un segment donné. Propose 2 hypothèses MÉTIER plausibles "
-            "sur la cause racine (campagne, prix, produit, technique...). Ce sont "
-            "des spéculations à vérifier par un humain : n'invente aucun chiffre, "
-            "ne reformule pas le verdict. Renvoie UNIQUEMENT un tableau JSON de "
-            "2 chaînes courtes en français, chacune formulée comme une question."
+            "A causal investigation has PROVEN that a metric move localizes to a "
+            "given segment. Suggest 2 plausible BUSINESS hypotheses for the root "
+            "cause (campaign, pricing, product, technical...). These are "
+            "speculations for a human to verify: do not invent any figure, do not "
+            "restate the verdict. Return ONLY a JSON array of 2 short strings in "
+            "English, each phrased as a question."
         )
         try:
             out = json.loads(_strip_fences(self.complete(system,
@@ -98,16 +101,16 @@ class QwenClient:
         except Exception:
             return template_speculations(payload)
 
-    # --- usage 2 : rédiger la conclusion (ne calcule rien) ---
+    # --- use 2: write the conclusion (computes nothing) ---
     def write_report(self, payload: dict) -> str:
         if self.mock:
             return template_report(payload)
         system = (
-            "Tu rédiges la conclusion d'une investigation causale en 2 à 3 phrases, "
-            "en français, ton factuel et sobre. On te fournit un verdict et des CHIFFRES "
-            "DÉJÀ CALCULÉS. Tu ne dois inventer AUCUN chiffre ni AUCUNE cause : tu te "
-            "contentes de reformuler. Si le verdict est ABSTAIN, explique clairement "
-            "qu'aucune cause localisée n'a pu être prouvée et qu'on s'abstient d'agir."
+            "Write the conclusion of a causal investigation in 2 to 3 sentences, "
+            "in English, factual and sober. You are given a verdict and ALREADY "
+            "COMPUTED numbers. You must not invent ANY figure or ANY cause: you "
+            "only rephrase. If the verdict is ABSTAIN, state clearly that no "
+            "localized cause could be proven and that the agent refrains from acting."
         )
         try:
             return self.complete(system, json.dumps(payload, ensure_ascii=False))
@@ -116,35 +119,35 @@ class QwenClient:
 
 
 def template_report(p: dict) -> str:
-    """Rédaction déterministe (mode mock / fallback). Mêmes faits, sans LLM."""
+    """Deterministic wording (mock mode / fallback). Same facts, no LLM."""
     verdict = p.get("verdict")
     metric = p.get("metric", "—")
     if verdict == "NO_ANOMALY":
-        return "Aucune anomalie matérielle détectée. Rien à expliquer."
+        return "No material anomaly detected. Nothing to explain."
     if verdict == "ASSERT":
-        refined = f" Le drill-down affine la cause sur {p['refined']}." if p.get("refined") else ""
-        return (f"PROUVÉ — la variation de '{metric}' se localise sur "
+        refined = f" The drill-down refines the cause to {p['refined']}." if p.get("refined") else ""
+        return (f"PROVEN — the move in '{metric}' localizes to "
                 f"{p['winning_dim']}={p['leading_segment']} "
-                f"(concentration {p['concentration']:.0%}, confiance {p['confidence']:.2f})."
+                f"(concentration {p['concentration']:.0%}, confidence {p['confidence']:.2f})."
                 f"{refined} "
-                f"Action : {p['action_kind']}. {p['action_detail']}")
-    return (f"ABSTENTION — la variation de '{metric}' est réelle mais ne se localise "
-            f"sur aucune dimension testée ({', '.join(p.get('dims_tried', []))}). "
-            f"Cause vraisemblablement systémique. Action : {p['action_kind']}. {p['action_detail']}")
+                f"Action: {p['action_kind']}. {p['action_detail']}")
+    return (f"ABSTAINED — the move in '{metric}' is real but does not localize "
+            f"on any tested dimension ({', '.join(p.get('dims_tried', []))}). "
+            f"Likely a systemic cause. Action: {p['action_kind']}. {p['action_detail']}")
 
 
 def template_speculations(p: dict) -> list[str]:
-    """Spéculations déterministes (mode mock / fallback)."""
+    """Deterministic speculations (mock mode / fallback)."""
     tgt = p.get("refined") or f"{p.get('winning_dim')}={p.get('leading_segment')}"
     return [
-        f"Quelque chose a-t-il changé récemment côté {tgt} — campagne, prix, "
-        f"landing page, tracking ?",
-        f"Un incident technique limité à {tgt} (intégration, paiement, latence) "
-        f"coïncide-t-il avec la période ?",
+        f"Did anything change recently on the {tgt} side — campaign, pricing, "
+        f"landing page, tracking?",
+        f"Does a technical incident limited to {tgt} (integration, payment, "
+        f"latency) coincide with the period?",
     ]
 
 
-# --- singleton paresseux partagé par les nodes ---
+# --- lazy singleton shared by the nodes ---
 _CLIENT: QwenClient | None = None
 
 

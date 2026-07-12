@@ -1,20 +1,19 @@
 """
-gate_check.py — ferme Phase 0.
+gate_check.py — validates the math layer against the oracle.
 
-Compare TA decompose à l'oracle, colonne par colonne, sur 3 scénarios.
-CLEAN/DIFFUSE laissent mix=interaction=0 : insuffisant seuls.
-MIXSHIFT allume les trois termes -> c'est lui qui teste vraiment.
-
-Pose ce fichier à côté de attribution_reference.py ET de ton attribution.py.
+Compares the production decompose() to the reference oracle, column by
+column, on 3 scenarios. CLEAN/DIFFUSE leave mix=interaction=0, which is not
+enough on its own; MIXSHIFT lights up all three terms — it is the scenario
+that really tests the decomposition.
 """
 import numpy as np
 import pandas as pd
 from attribution_reference import BASELINE, CLEAN, DIFFUSE, decompose as oracle
 
-from attribution import decompose as mine   # <-- TA version
+from attribution import decompose as mine   # <-- production version
 
 MIXSHIFT = pd.DataFrame([
-    {"segment": "organic",  "n": 14000, "c": 630},   # n ET r bougent
+    {"segment": "organic",  "n": 14000, "c": 630},   # n AND r both move
     {"segment": "paid",     "n": 4000,  "c": 320},
     {"segment": "referral", "n": 3000,  "c": 240},
     {"segment": "email",    "n": 1000,  "c": 100},
@@ -27,10 +26,10 @@ for name, curr in [("CLEAN", CLEAN), ("DIFFUSE", DIFFUSE), ("MIXSHIFT", MIXSHIFT
     b = mine(BASELINE, curr, dims="segment").reindex(a.index)
     ok = np.allclose(a[COLS].values, b[COLS].values, atol=1e-10)
     touches_mix = abs(a["mix"]).sum() > 1e-9
-    print(f"{name:9s} match oracle: {ok}   (exerce mix/interaction ? {touches_mix})")
+    print(f"{name:9s} matches oracle: {ok}   (exercises mix/interaction? {touches_mix})")
     if not ok:
         all_ok = False
         diff = (a[COLS] - b[COLS]).abs()
         print(diff[diff > 1e-10].dropna(how="all"))
 
-print("\nPhase 0 CLOSE \u2713" if all_ok else "\nPhase 0 PAS ENCORE \u2014 corrige et relance.")
+print("\nMath layer VALIDATED ✓" if all_ok else "\nNOT YET — fix and rerun.")
