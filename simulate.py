@@ -1,10 +1,10 @@
 """
-simulate.py — exécute le flux SANS langgraph, en répliquant le routing,
-pour valider la logique end-to-end. Force le mode mock : toujours offline
-et déterministe, même si une clé Qwen est configurée.
+simulate.py — runs the flow WITHOUT langgraph, replicating the routing, to
+validate the logic end to end. Forces mock mode: always offline and
+deterministic, even if a Qwen key is configured.
 """
 import os
-os.environ["QWEN_MOCK"] = "1"   # avant tout import qui instancie le client
+os.environ["QWEN_MOCK"] = "1"   # before any import that instantiates the client
 
 from panels import BASELINE, CLEAN, DIFFUSE
 from nodes import (detector, route_after_detect, hypothesizer, investigator,
@@ -31,7 +31,7 @@ def base_state(current, autopilot=False):
     return {
         "baseline": BASELINE, "current": current,
         "metrics": ["conversion", "activation"],
-        "dims": ["device", "segment"],   # device d'abord -> force la boucle
+        "dims": ["device", "segment"],   # device first -> forces the loop
         "autopilot_enabled": autopilot,
     }
 
@@ -39,11 +39,11 @@ def base_state(current, autopilot=False):
 if __name__ == "__main__":
     for name, curr in [("CLEAN", CLEAN), ("DIFFUSE", DIFFUSE)]:
         print("\n" + "=" * 70)
-        print(f"SCÉNARIO {name}")
+        print(f"SCENARIO {name}")
         print("=" * 70)
         s = run(base_state(curr, autopilot=(name == "CLEAN")))
         for line in s["trace"]:
             print("  ·", line)
-        print(f"\n  VERDICT : {s['verdict']}   confiance={s.get('confidence', 0):.2f}")
+        print(f"\n  VERDICT : {s['verdict']}   confidence={s.get('confidence', 0):.2f}")
         print(f"  ACTION  : {s['actions'][0].kind} — {s['actions'][0].detail}")
-        print(f"  RAPPORT : {s['report']}")
+        print(f"  REPORT  : {s['report']}")

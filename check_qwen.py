@@ -1,8 +1,8 @@
 """
-check_qwen.py — vérifie que ta clé DASHSCOPE et l'endpoint Qwen répondent.
+check_qwen.py — verifies that the DASHSCOPE key and the Qwen endpoint respond.
 
-Lance :  python3.12 check_qwen.py
-Prérequis : pip install openai python-dotenv  +  DASHSCOPE_API_KEY configurée.
+Run:  python check_qwen.py
+Prerequisites: pip install openai python-dotenv  +  DASHSCOPE_API_KEY set.
 """
 import os
 
@@ -16,17 +16,17 @@ from llm import QwenClient
 
 key = os.environ.get("DASHSCOPE_API_KEY")
 if not key:
-    raise SystemExit("DASHSCOPE_API_KEY absente. Fais : export DASHSCOPE_API_KEY=... "
-                     "ou mets-la dans .env (python-dotenv).")
+    raise SystemExit("DASHSCOPE_API_KEY is missing. Run: export DASHSCOPE_API_KEY=... "
+                     "or put it in .env (python-dotenv).")
 
 client = QwenClient(mock=False)
-print(f"modèle   : {client.model}")
+print(f"model    : {client.model}")
 print(f"base_url : {client.base_url}")
-print("appel Qwen en cours...")
+print("calling Qwen...")
 reply = client.complete(
-    system="Réponds en un mot.",
-    user="Dis 'pret' si tu reçois ce message.",
+    system="Answer in one word.",
+    user="Say 'ready' if you receive this message.",
     max_tokens=10,
 )
-print(f"réponse Qwen : {reply!r}")
-print("\nOK — clé et endpoint fonctionnels. Gate Qwen franchissable.")
+print(f"Qwen reply: {reply!r}")
+print("\nOK — key and endpoint working.")

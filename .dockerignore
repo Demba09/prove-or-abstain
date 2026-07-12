@@ -1,14 +1,14 @@
-# Secrets — ne doivent JAMAIS entrer dans l'image.
+# Secrets — must NEVER enter the image.
 .env
 
-# Environnements / caches locaux
+# Local environments / caches
 .venv
 **/__pycache__
 **/*.pyc
 .pytest_cache/
 .DS_Store
 
-# Inutile au runtime de l'API (panels en mémoire)
+# Not needed at API runtime (panels are in-memory)
 data/
 tests/
 scripts/

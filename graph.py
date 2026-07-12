@@ -1,7 +1,7 @@
 """
-graph.py — assemble les sept nodes dans un StateGraph LangGraph.
+graph.py — assembles the seven nodes into a LangGraph StateGraph.
 
-Topologie :
+Topology:
 
         START
           │
@@ -17,16 +17,16 @@ Topologie :
        verifier ─route_after_verify───┤
           │ "actuate"                 │
           ▼                           │
-       driller  (affine au sein du    │
-          │      segment gagnant)     │
+       driller  (refines within the   │
+          │      winning segment)     │
           ▼                           │
        actuator                       │
           │                           │
           ▼                           ▼
        reporter ───────────────────► END
 
-Les nodes vivent dans nodes.py et n'importent pas langgraph : ce fichier
-est le SEUL point de couplage au framework.
+The nodes live in nodes.py and do not import langgraph: this file is the
+ONLY coupling point to the framework.
 """
 from __future__ import annotations
 from langgraph.graph import StateGraph, START, END

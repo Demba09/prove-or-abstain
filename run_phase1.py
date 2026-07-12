@@ -1,18 +1,18 @@
 """
-run_phase1.py — exécute le graphe compilé sur les deux scénarios de démo.
+run_phase1.py — runs the compiled graph on the two headline demo scenarios.
 
-  CLEAN  (autopilot ON)  -> ASSERT segment=paid -> EXECUTE
+  CLEAN   (autopilot ON)  -> ASSERT segment=paid -> EXECUTE
   DIFFUSE (autopilot OFF) -> ABSTAIN -> ESCALATE
 
-Si DASHSCOPE_API_KEY est configurée (via .env ou export), Qwen est appelé
-pour le plan d'exploration et la rédaction ; sinon, fallback mock automatique.
+If DASHSCOPE_API_KEY is configured (via .env or export), Qwen is called for
+the exploration plan and the wording; otherwise the deterministic mock is
+used automatically.
 
-Lance :  python3.12 run_phase1.py
-(nécessite : pip install langgraph openai python-dotenv)
+Run:  python run_phase1.py
 """
 try:
     from dotenv import load_dotenv
-    load_dotenv()                    # lit .env -> os.environ (clé jamais en dur)
+    load_dotenv()                    # reads .env -> os.environ (key never hardcoded)
 except ModuleNotFoundError:
     pass
 
@@ -25,7 +25,7 @@ def initial_state(current, autopilot=False):
         "baseline": BASELINE,
         "current": current,
         "metrics": ["conversion", "activation"],
-        "dims": ["device", "segment"],   # device d'abord -> exerce la boucle
+        "dims": ["device", "segment"],   # device first -> exercises the loop
         "autopilot_enabled": autopilot,
         "trace": [],
     }
@@ -34,12 +34,12 @@ def initial_state(current, autopilot=False):
 if __name__ == "__main__":
     for name, curr, autopilot in [("CLEAN", CLEAN, True), ("DIFFUSE", DIFFUSE, False)]:
         print("\n" + "=" * 72)
-        print(f"SCÉNARIO {name}   (autopilot={'ON' if autopilot else 'OFF'})")
+        print(f"SCENARIO {name}   (autopilot={'ON' if autopilot else 'OFF'})")
         print("=" * 72)
         final = APP.invoke(initial_state(curr, autopilot))
         for line in final.get("trace", []):
             print("  ·", line)
         action = final["actions"][0]
-        print(f"\n  VERDICT  : {final['verdict']}   confiance={final.get('confidence', 0):.2f}")
-        print(f"  ACTION   : {action.kind} — {action.detail}")
-        print(f"  RAPPORT  : {final['report']}")
+        print(f"\n  VERDICT : {final['verdict']}   confidence={final.get('confidence', 0):.2f}")
+        print(f"  ACTION  : {action.kind} — {action.detail}")
+        print(f"  REPORT  : {final['report']}")

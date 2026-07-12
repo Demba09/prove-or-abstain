@@ -1,23 +1,24 @@
 """
-panels.py — données de démo multimetric/multidim + projection.
+panels.py — multimetric/multidim demo data + projection.
 
-Panel long : une ligne par cellule atomique [metric, segment, device, n, c]
-(counts bruts ; les taux sont TOUJOURS dérivés en aval).
+Long panel: one row per atomic cell [metric, segment, device, n, c]
+(raw counts; rates are ALWAYS derived downstream).
 
-project() projette ce panel sur UNE métrique + UNE dimension via groupby :
-c'est la couche "per-hypothesis projection". decompose() opère ensuite dessus.
+project() projects the panel onto ONE metric + ONE dimension via groupby:
+that is the "per-hypothesis projection" layer. decompose() then operates
+on the projection.
 
-Quatre scénarios calibrés (structure opposée sur 'conversion') :
-  CLEAN    : seul le segment 'paid' décroche. Localise le long de 'segment',
-             mais paraît diffus le long de 'device' (paid ~50/50 mobile/desktop).
-             -> la boucle essaie 'device' (ABSTAIN) puis 'segment' (ASSERT).
-  DIFFUSE  : tous les taux baissent uniformément. Aucune dimension ne localise.
-             -> on épuise les dimensions -> ABSTAIN final.
-  MIXSHIFT : composition ET taux bougent en même temps (mix + rate + interaction
-             tous non nuls). Mêmes totaux par segment que le MIXSHIFT validé dans
-             gate_check_gates.py -> ABSTAIN, mécanisme entremêlé.
-  DEEP     : seul paid × mobile s'effondre -> ASSERT device=mobile, puis le
-             drill-down affine : segment=paid au sein de mobile.
+Four calibrated scenarios (opposite structures on 'conversion'):
+  CLEAN    : only the 'paid' segment breaks. Localizes along 'segment' but
+             looks diffuse along 'device' (paid is ~50/50 mobile/desktop).
+             -> the loop tries 'device' (ABSTAIN) then 'segment' (ASSERT).
+  DIFFUSE  : every rate drops uniformly. No dimension localizes.
+             -> dimensions exhausted -> final ABSTAIN.
+  MIXSHIFT : composition AND rates move at once (rate + mix + interaction
+             all non-zero). Same per-segment totals as the MIXSHIFT
+             validated in gate_check_gates.py -> ABSTAIN, entangled mechanism.
+  DEEP     : only paid × mobile collapses -> ASSERT device=mobile, then the
+             drill-down refines: segment=paid within mobile.
 """
 from __future__ import annotations
 import pandas as pd
@@ -25,21 +26,21 @@ import pandas as pd
 SEGMENTS = ["organic", "paid", "referral", "email"]
 DEVICES = ["mobile", "desktop"]
 
-# n par (segment, device). 'paid' volontairement 50/50 mobile/desktop.
+# n per (segment, device). 'paid' deliberately 50/50 mobile/desktop.
 _N = {
     ("organic",  "mobile"): 5000, ("organic",  "desktop"): 5000,
     ("paid",     "mobile"): 3000, ("paid",     "desktop"): 3000,
     ("referral", "mobile"): 1500, ("referral", "desktop"): 1500,
     ("email",    "mobile"): 500,  ("email",    "desktop"): 500,
 }
-# taux conversion baseline par segment (indépendant du device)
+# baseline conversion rate per segment (device-independent)
 _RATE0 = {"organic": 0.05, "paid": 0.07, "referral": 0.08, "email": 0.12}
-# taux activation baseline (métrique stable, sert de leurre au détecteur)
+# baseline activation rate (stable metric, serves as a decoy for the detector)
 _ACT0 = {"organic": 0.30, "paid": 0.32, "referral": 0.28, "email": 0.35}
 
 
 def _rows(rate_conv, rate_act, n_map=None):
-    """Construit un panel long à partir de fonctions (segment, device)->taux."""
+    """Build a long panel from (segment, device) -> rate functions."""
     n_map = _N if n_map is None else n_map
     rows = []
     for seg in SEGMENTS:
@@ -54,30 +55,30 @@ def _rows(rate_conv, rate_act, n_map=None):
 
 BASELINE = _rows(lambda s, d: _RATE0[s], lambda s, d: _ACT0[s])
 
-# CLEAN : conversion de 'paid' chute 7.0% -> 5.0% ; le reste inchangé.
+# CLEAN: 'paid' conversion drops 7.0% -> 5.0%; everything else unchanged.
 CLEAN = _rows(
     lambda s, d: 0.05 if s == "paid" else _RATE0[s],
     lambda s, d: _ACT0[s],
 )
 
-# DIFFUSE : conversion de TOUS les segments baisse de 0.6pp ; même ΔR global.
+# DIFFUSE: EVERY segment's conversion drops by 0.6pp; same aggregate ΔR.
 DIFFUSE = _rows(
     lambda s, d: _RATE0[s] - 0.006,
     lambda s, d: _ACT0[s],
 )
 
-# DEEP : seul le croisement paid × mobile s'effondre (7.0% -> 3.0%).
-# Localise d'abord sur UNE dimension (device=mobile), puis le drill-down
-# affine au sein de mobile : segment=paid. Démontre le raffinement.
+# DEEP: only the paid × mobile cell collapses (7.0% -> 3.0%).
+# Localizes first on ONE dimension (device=mobile), then the drill-down
+# refines within mobile: segment=paid. Demonstrates the refinement.
 DEEP = _rows(
     lambda s, d: 0.03 if (s, d) == ("paid", "mobile") else _RATE0[s],
     lambda s, d: _ACT0[s],
 )
 
-# MIXSHIFT : la composition bouge (organic gonfle, paid rétrécit) ET les taux
-# bougent (organic baisse, paid/email…) -> rate, mix et interaction tous non nuls.
-# Totaux par segment identiques au MIXSHIFT de gate_check_gates.py, répartis
-# 50/50 mobile/desktop pour rester diffus le long de 'device'.
+# MIXSHIFT: composition moves (organic grows, paid shrinks) AND rates move
+# (organic drops, paid/email...) -> rate, mix and interaction all non-zero.
+# Same per-segment totals as gate_check_gates.py's MIXSHIFT, split 50/50
+# mobile/desktop so it stays diffuse along 'device'.
 _N_MIXSHIFT = {
     ("organic",  "mobile"): 7000, ("organic",  "desktop"): 7000,
     ("paid",     "mobile"): 2000, ("paid",     "desktop"): 2000,
@@ -94,28 +95,30 @@ MIXSHIFT = _rows(
 
 
 def metric_totals(panel: pd.DataFrame, metric: str) -> tuple[float, float]:
-    """(n_total, c_total) pour une métrique, toutes dimensions confondues."""
+    """(n_total, c_total) for one metric, across all dimensions."""
     sub = panel[panel["metric"] == metric]
     return float(sub["n"].sum()), float(sub["c"].sum())
 
 
 def project(panel: pd.DataFrame, metric: str, dim: str) -> pd.DataFrame:
-    """Projette le panel sur (metric, dim) : groupby dim, somme des counts bruts.
-    Retourne [dim, n, c] — prêt pour decompose(base, curr, dims=dim)."""
+    """Project the panel onto (metric, dim): groupby dim, sum the raw counts.
+    Returns [dim, n, c] — ready for decompose(base, curr, dims=dim)."""
     sub = panel[panel["metric"] == metric]
     return sub.groupby(dim, as_index=False)[["n", "c"]].sum()
 
 
-# --------------------------------------------------------- série temporelle
+# --------------------------------------------------------------- time series
 def split_series(panel: pd.DataFrame, window: int | None = None,
                  period_col: str = "period") -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Découpe un panel long multi-périodes en (baseline, current).
+    """Split a multi-period long panel into (baseline, current).
 
-    current  = la dernière période.
-    baseline = les `window` périodes précédentes (toutes si None), POOLÉES en
-               sommant n et c par cellule — une baseline glissante, plus robuste
-               qu'une seule période de référence.
+    current  = the last period.
+    baseline = the `window` preceding periods (all of them if None), POOLED by
+               summing n and c per cell — a rolling baseline, more robust than
+               a single reference period.
     """
+    if window is not None and window < 1:
+        raise ValueError("window must be >= 1")
     periods = sorted(panel[period_col].unique())
     if len(periods) < 2:
         raise ValueError("a series panel needs at least 2 periods")
@@ -130,8 +133,8 @@ def split_series(panel: pd.DataFrame, window: int | None = None,
 
 
 def make_series(n_periods: int = 8) -> pd.DataFrame:
-    """Panel de démo multi-périodes : n_periods-1 semaines stables (BASELINE),
-    puis la dernière semaine décroche (CLEAN). Déterministe."""
+    """Multi-period demo panel: n_periods-1 stable weeks (BASELINE), then the
+    last week breaks (CLEAN). Deterministic."""
     frames = []
     for p in range(n_periods - 1):
         f = BASELINE.copy()
