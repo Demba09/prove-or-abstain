@@ -88,9 +88,11 @@ def hypothesizer(state: AgentState) -> dict:
 
     if not state.get("dims_planned"):
         a = state["anomalies"][0]
-        ordered = get_client().plan_dimensions(state["target_metric"], a.delta_rel, queue)
-        if ordered != queue:
-            trace = trace + [f"hypothesizer: LLM dimension plan -> {ordered}"]
+        client = get_client()
+        ordered = client.plan_dimensions(state["target_metric"], a.delta_rel, queue)
+        tag = f"qwen:{client.model}" if client.last_mode == "real" else client.last_mode
+        note = f" ({client.last_error})" if client.last_mode == "fallback" else ""
+        trace = trace + [f"hypothesizer: dimension plan [{tag}]{note} -> {ordered}"]
         queue = ordered
         updates["dims_planned"] = True
 
@@ -284,6 +286,9 @@ def reporter(state: AgentState) -> dict:
                 "best_concentration": best,
             })
 
-    text = get_client().write_report(payload)
+    client = get_client()
+    text = client.write_report(payload)
+    tag = f"qwen:{client.model}" if client.last_mode == "real" else client.last_mode
     return {"report": text, "speculations": speculations,
-            "trace": _log(state, f"reporter: {verdict} written.")}
+            "llm": {"model": client.model, "mode": client.last_mode},
+            "trace": _log(state, f"reporter: {verdict} written [{tag}].")}
