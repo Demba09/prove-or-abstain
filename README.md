@@ -160,6 +160,10 @@ POST /investigate
 POST /investigate/upload
   multipart: baseline=<csv>, current=<csv>, autopilot=<bool>, sum_metrics=<csv names>
   same return shape
+POST /investigate/suggest
+  multipart: file=<csv>
+  return: { columns, default:{dimensions,sum_metrics,metrics}, suggestion }
+  framing aid only — proposes a setup for the user to confirm, runs nothing
 POST /investigate/series
   multipart: series=<csv with a 'period' column>, window=<int, optional>
   last period vs. a rolling baseline pooled over the prior `window` periods

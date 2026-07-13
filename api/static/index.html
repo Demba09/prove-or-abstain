@@ -126,6 +126,13 @@
       <input type="file" id="current" accept=".csv"> <span class="hint">current</span>
       <button class="secondary" onclick="runUpload()">investigate CSV</button>
     </div>
+    <div class="row" style="margin-top:10px">
+      <label class="hint" style="margin:0">sum metrics
+        <input type="text" id="sum_metrics" placeholder="e.g. revenue" style="font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:6px;width:150px">
+      </label>
+      <button class="secondary" onclick="suggestSetup()">suggest setup (Qwen)</button>
+    </div>
+    <p class="hint" id="suggestion" style="display:none"></p>
     <p id="error"></p>
   </div>
 
@@ -203,7 +210,43 @@ function runUpload() {
   fd.append('baseline', base);
   fd.append('current', curr);
   fd.append('autopilot', $('autopilot').checked);
+  fd.append('sum_metrics', $('sum_metrics').value.trim());
   call('/investigate/upload', {method: 'POST', body: fd});
+}
+
+// Framing aid: Qwen proposes how to set up the analysis; it only PREFILLS the
+// controls — the user confirms and the deterministic run decides. No verdict
+// here. Falls back to the deterministic default when Qwen is offline (mock).
+async function suggestSetup() {
+  const base = $('baseline').files[0];
+  if (!base) return fail('Select a baseline CSV first, then ask for a setup suggestion.');
+  $('error').style.display = 'none';
+  setBusy(true);
+  try {
+    const fd = new FormData();
+    fd.append('file', base);
+    const r = await fetch('/investigate/suggest', {method: 'POST', body: fd});
+    const b = await r.json();
+    if (!r.ok) throw new Error(b.detail ? JSON.stringify(b.detail) : r.statusText);
+    const s = b.suggestion;   // null in mock / offline
+    const el = $('suggestion');
+    el.style.display = 'block';
+    if (s) {
+      $('sum_metrics').value = (s.sum_metrics || []).join(',');   // prefill, editable
+      el.innerHTML = `<b>Qwen suggests</b> — dimensions: ${(s.dimensions || []).join(', ') || '—'}`
+        + ` · sum metrics: ${(s.sum_metrics || []).join(', ') || 'none'}`
+        + (s.rationale ? `<br><em>${s.rationale}</em>` : '')
+        + `<br><span style="color:var(--muted)">Prefilled for you to confirm — the verdict is decided by the math on the inputs you run, not by this suggestion.</span>`;
+    } else {
+      const d = b.default || {};
+      el.innerHTML = `<b>Deterministic default</b> (Qwen offline) — dimensions: ${(d.dimensions || []).join(', ') || '—'}`
+        + ` · metrics: ${(d.metrics || []).join(', ')}. Set sum metrics manually if any.`;
+    }
+  } catch (e) {
+    fail(e.message);
+  } finally {
+    setBusy(false);
+  }
 }
 
 // which nodes fired, and how many hypothesizer passes (= loop laps), from the trace

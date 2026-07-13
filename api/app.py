@@ -224,6 +224,26 @@ def investigate_upload(baseline: UploadFile = File(...),
     return {"panel": "upload", **result}
 
 
+@app.post("/investigate/suggest")
+def investigate_suggest(file: UploadFile = File(...)) -> dict:
+    """Framing aid — NOT an investigation. Given one CSV, return the
+    deterministic default schema (dimensions = every column except
+    metric/n/c/period) alongside an optional Qwen suggestion the user can
+    ratify before running /investigate/upload. Qwen decides nothing here; the
+    verdict later depends only on the confirmed inputs."""
+    from llm import get_client
+    df = _read_panel(file, "file")
+    dims = [c for c in df.columns if c not in _RESERVED]
+    metrics = sorted(df["metric"].unique())
+    sample = df.head(8).to_dict(orient="records")
+    suggestion = get_client().suggest_setup(list(df.columns), sample)
+    return _jsonable({
+        "columns": list(df.columns),
+        "default": {"dimensions": dims, "sum_metrics": [], "metrics": metrics},
+        "suggestion": suggestion,   # None in mock mode / on error
+    })
+
+
 @app.post("/investigate/series")
 def investigate_series(series: UploadFile = File(...),
                        window: int | None = Form(None),

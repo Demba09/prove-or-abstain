@@ -127,6 +127,59 @@ class QwenClient:
         order += [d for d in dims if d not in order]     # re-add anything dropped
         return order or list(dims)
 
+    # --- setup aid: suggest how to frame an unknown CSV (decides nothing) ---
+    def suggest_setup(self, columns: list[str], sample_rows: list[dict]) -> dict | None:
+        """Given the columns and a few sample rows of an uploaded CSV, PROPOSE
+        which columns are analysis dimensions and which metrics are sums
+        (revenue-like) rather than rates. This is a framing aid for the user to
+        confirm — it never drives a run on its own, and the verdict is
+        deterministic once the user has ratified the inputs. Returns None in
+        mock mode or on any error (the deterministic default then stands)."""
+        if self.mock:
+            return None
+        reserved = {"metric", "n", "c", "period"}
+        candidate_dims = [c for c in columns if c not in reserved]
+        metrics = sorted({r.get("metric") for r in sample_rows if r.get("metric") is not None})
+        system = (
+            "You help set up a causal analysis on an uploaded metrics table. "
+            "Columns are: metric, n (population), c (numerator), optional period, "
+            "and one or more dimension columns. Call `suggest_analysis_setup` "
+            "with: the subset of columns that are analysis dimensions, and the "
+            "metrics that are SUMS (a total such as revenue where c can exceed n) "
+            "rather than rates (where c is a count bounded by n). Decide nothing "
+            "else; the user confirms your suggestion before anything runs."
+        )
+        user = json.dumps({"columns": list(columns), "candidate_dimensions": candidate_dims,
+                           "metrics": metrics, "sample_rows": sample_rows[:8]},
+                          ensure_ascii=False)
+        tool = {
+            "type": "function",
+            "function": {
+                "name": "suggest_analysis_setup",
+                "description": "Propose dimensions and sum-type metrics for the table.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "dimensions": {"type": "array",
+                                       "items": {"type": "string", "enum": candidate_dims}},
+                        "sum_metrics": {"type": "array",
+                                        "items": {"type": "string", "enum": metrics}},
+                        "rationale": {"type": "string",
+                                      "description": "one short sentence, plain language"},
+                    },
+                    "required": ["dimensions", "sum_metrics", "rationale"],
+                },
+            },
+        }
+        try:
+            out = self.complete_tool(system, user, tool, max_tokens=250)
+            dims = [d for d in out.get("dimensions", []) if d in candidate_dims]
+            sums = [m for m in out.get("sum_metrics", []) if m in metrics]
+            return {"dimensions": dims or candidate_dims, "sum_metrics": sums,
+                    "rationale": str(out.get("rationale", ""))[:400]}
+        except Exception:
+            return None
+
     # --- use 3: speculate about the business WHY (labelled, never mixed
     # with the proven verdict; computes nothing, decides nothing) ---
     def speculate_causes(self, payload: dict) -> list[str]:

@@ -173,6 +173,20 @@ def test_upload_roundtrip_matches_panels():
         assert body["panel"] == "upload" and body["verdict"] == want
 
 
+def test_suggest_returns_default_and_no_verdict():
+    # The framing endpoint returns the deterministic default schema and, in
+    # mock mode, no Qwen suggestion. It runs no investigation (no verdict).
+    from panels import BASELINE
+    r = client.post("/investigate/suggest", files={
+        "file": ("baseline.csv", _csv(BASELINE), "text/csv"),
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["suggestion"] is None                     # mock: Qwen offline
+    assert set(body["default"]["dimensions"]) == {"device", "segment"}
+    assert "verdict" not in body                           # framing only, no run
+
+
 def test_upload_clean_localizes_paid():
     from panels import BASELINE, CLEAN
     body = client.post("/investigate/upload", files={
