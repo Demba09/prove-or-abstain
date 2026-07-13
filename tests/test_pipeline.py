@@ -110,6 +110,22 @@ def test_investigate_verdicts():
         assert body["verdict"] == want, f"{panel}: {body['trace']}"
 
 
+def test_unified_state_has_inputs_and_trace():
+    # A2: one call returns the raw per-segment inputs (base vs current), the
+    # ordered dimension trace with each rejection reason, the decomposition and
+    # the verdict — no second endpoint needed.
+    body = client.post("/investigate", json={"panel": "clean"}).json()
+    assert body["inputs"] and body["inputs"]["segments"]
+    seg = body["inputs"]["segments"][0]
+    assert {"segment", "n0", "c0", "r0", "n1", "c1", "r1"} <= set(seg)
+    trace = body["dimension_trace"]
+    # device tried and rejected (with a reason), then segment asserted
+    assert trace[0]["dimension"] == "device" and trace[0]["verdict"] == "ABSTAIN"
+    assert trace[0]["rejection_reason"]
+    assert trace[-1]["dimension"] == "segment" and trace[-1]["verdict"] == "ASSERT"
+    assert trace[-1]["rejection_reason"] is None
+
+
 def test_clean_localizes_paid_after_loop():
     body = client.post("/investigate", json={"panel": "clean"}).json()
     assert body["root_cause"] == {"dimension": "segment", "segment": "paid"}

@@ -85,6 +85,37 @@ def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
     win = final.get("winning_report")
     drill = final.get("drilldown")
 
+    # A2 — the unified investigation object. One response carries everything a
+    # human (or a UI) needs to form and check an opinion: the raw input per
+    # segment (baseline vs current), the ordered dimension trace with each
+    # dimension's rejection reason, the per-segment decomposition, and the
+    # verdict. No second endpoint needed to show the data or the reasoning.
+
+    # raw inputs per segment along the dimension that was decomposed
+    inputs = None
+    dim = final.get("current_dim")
+    metric = final.get("target_metric")
+    if dim is not None and metric is not None:
+        from panels import project
+        b_p = project(final["baseline"], metric, dim).set_index(dim)
+        c_p = project(final["current"], metric, dim).set_index(dim)
+        segs = []
+        for seg in b_p.index.union(c_p.index):
+            n0, c0 = float(b_p.loc[seg, "n"]), float(b_p.loc[seg, "c"])
+            n1, c1 = float(c_p.loc[seg, "n"]), float(c_p.loc[seg, "c"])
+            segs.append({"segment": seg, "n0": n0, "c0": c0,
+                         "r0": c0 / n0 if n0 else 0.0,
+                         "n1": n1, "c1": c1, "r1": c1 / n1 if n1 else 0.0})
+        inputs = {"metric": metric, "dimension": dim, "segments": segs}
+
+    # ordered dimension trace: what was tried, in order, and why each verdict
+    dimension_trace = [
+        {"dimension": d, "verdict": rep.verdict,
+         "rejection_reason": None if rep.verdict == "ASSERT"
+                             else "; ".join(rep.reasons)}
+        for d, rep in final.get("reports_by_dim", {}).items()
+    ]
+
     # per-segment contribution breakdown of the dimension that was decomposed
     # (the winning one on ASSERT, the last tried on ABSTAIN) — feeds the
     # waterfall chart on the demo page. Numbers only, straight from decompose().
@@ -116,7 +147,9 @@ def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
             if win is not None
             else None
         ),
-        "gates": {dim: asdict(rep) for dim, rep in final.get("reports_by_dim", {}).items()},
+        "inputs": inputs,
+        "dimension_trace": dimension_trace,
+        "gates": {d: asdict(rep) for d, rep in final.get("reports_by_dim", {}).items()},
         "drilldown": (
             {"parent": drill["parent"],
              "refined": drill["refined"],
