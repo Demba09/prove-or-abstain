@@ -16,9 +16,10 @@ can't localize a cause.
 `prove-or-abstain` investigates a metric anomaly (e.g. a conversion or churn
 rate move) the way a careful analyst would: it forms a hypothesis about which
 dimension explains the shift, tests it with an exact rate/mix/interaction
-decomposition, and checks the result against four deterministic gates
+decomposition, and checks the result against five deterministic gates
 (materiality, concentration, a two-proportion z-test on the leading segment,
-mechanism cleanliness). If a dimension clears all four, it **ASSERTs** the
+mechanism cleanliness, and a combined-confidence floor that keeps random data
+from being ASSERTed). If a dimension clears all five, it **ASSERTs** the
 cause, drills one level down to refine it (e.g. `device=mobile`, narrowed to
 `segment=paid` within mobile), and proposes a scoped action — which it can
 *execute* autonomously if confidence is high and autopilot is enabled. If no

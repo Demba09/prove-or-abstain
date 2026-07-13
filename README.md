@@ -46,7 +46,7 @@ deterministic mock (`QWEN_MOCK=1`) runs the same pipeline offline.
 
 ## Verification gates
 
-`ASSERT` requires all four gates to pass. A failed gate produces an
+`ASSERT` requires all five gates to pass. A failed gate produces an
 `ABSTAIN` with the failing condition named in the response.
 
 | Gate | Condition | Purpose |
@@ -55,12 +55,30 @@ deterministic mock (`QWEN_MOCK=1`) runs the same pipeline offline.
 | localized | top contribution share ≥ 0.55 | one segment actually dominates |
 | significant | two-proportion z-test on the leading segment, p ≤ 0.01 | the leader's move is not sampling noise |
 | clean | interaction share ≤ 0.50 | rate and mix effects are separable |
+| confident | concentration × significance × cleanliness ≥ 0.30 | the gates don't all pass only marginally |
 
 The significance gate is a real hypothesis test, not a magic sample-size
 number: a perfectly concentrated move on a segment of 60 users abstains with
 `p=0.55`, the same move on 6000 users asserts with `p<1e-5`. For sum metrics
 (no per-unit variance to test against) it falls back to a minimum-sample
 floor of 1000.
+
+The confidence gate is the one that hardens the agent against arbitrary data.
+The four structural gates are pass/fail on independent conditions, and each
+can clear its threshold by a hair; on genuinely random panels one segment
+often just barely dominates *and* the z-test just barely fires on large `n`,
+so the four-gate design ASSERTs a spurious cause about half the time. Folding
+the same factors into a single confidence product and requiring ≥ 0.30 cuts
+that to ~15% while leaving every calibrated demo verdict unchanged — a move
+that only marginally clears each gate does not clear their product. Because
+autopilot already needs confidence ≥ 0.70, no autonomous action was ever at
+risk; this gate governs the `RECOMMEND` path.
+
+Input counts are validated at the API boundary: `n` and `c` must be
+non-negative, and for rate metrics `c ≤ n` (a numerator cannot exceed its
+population). Invalid rows are rejected as a `400`, never reaching the z-test
+as an ill-formed proportion. Sum metrics are exempt from `c ≤ n`, since there
+`c` is a total (revenue) that legitimately exceeds `n` (customers).
 
 ## Quickstart
 

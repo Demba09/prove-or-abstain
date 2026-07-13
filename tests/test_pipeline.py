@@ -155,6 +155,42 @@ def test_upload_rejects_mismatched_columns():
     assert "same columns" in r.json()["detail"]
 
 
+def test_upload_rejects_c_over_n():
+    # A stray rate-metric row with c > n is not a valid proportion: it must be
+    # a clean 400, not a 500 from the z-test's sqrt of a negative variance.
+    from panels import BASELINE, CLEAN
+    bad = BASELINE.copy()
+    bad.loc[bad.index[0], "c"] = bad.loc[bad.index[0], "n"] * 5
+    r = client.post("/investigate/upload", files={
+        "baseline": ("baseline.csv", _csv(bad), "text/csv"),
+        "current": ("current.csv", _csv(CLEAN), "text/csv"),
+    })
+    assert r.status_code == 400
+    assert "c > n" in r.json()["detail"]
+
+
+def test_upload_rejects_negative_counts():
+    from panels import BASELINE, CLEAN
+    bad = BASELINE.copy()
+    bad.loc[bad.index[0], "c"] = -10
+    r = client.post("/investigate/upload", files={
+        "baseline": ("baseline.csv", _csv(bad), "text/csv"),
+        "current": ("current.csv", _csv(CLEAN), "text/csv"),
+    })
+    assert r.status_code == 400
+    assert "negative" in r.json()["detail"]
+
+
+def test_sum_metric_allows_c_over_n():
+    # For a sum metric c is a total (revenue) that legitimately exceeds n
+    # (customers): the c <= n check must NOT fire here.
+    r = client.post("/investigate/upload",
+                    files={"baseline": open("examples/revenue_baseline.csv", "rb"),
+                           "current": open("examples/revenue_current.csv", "rb")},
+                    data={"sum_metrics": "revenue"})
+    assert r.status_code == 200, r.text
+
+
 # --------------------------------------------------------- significance gate
 def test_significance_gate_rejects_small_samples():
     # Same rates as CLEAN but n divided by 100: the concentration is perfect,
@@ -174,6 +210,19 @@ def test_significance_gate_passes_on_clean():
     rep = evaluate_gates(aggregate(out), out)
     assert rep.verdict == "ASSERT"
     assert rep.leading_p < 0.01 and abs(rep.leading_z) > 2.576
+
+
+# --------------------------------------------------------- confidence gate
+def test_confidence_gate_rejects_marginal_pass():
+    # A move that clears each structural gate only marginally still has a low
+    # confidence product -> ABSTAIN. Raising the floor above the clean panel's
+    # confidence forces exactly that path, proving the gate is wired in.
+    out = decompose(REF_BASELINE, REF_CLEAN, dims="segment")
+    strong = evaluate_gates(aggregate(out), out)
+    assert strong.verdict == "ASSERT"
+    rejected = evaluate_gates(aggregate(out), out, confidence_min=strong.confidence + 0.01)
+    assert rejected.verdict == "ABSTAIN"
+    assert any("combined confidence" in r for r in rejected.reasons)
 
 
 # --------------------------------------------------------------- sum metrics

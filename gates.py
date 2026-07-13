@@ -10,13 +10,17 @@ ABSTAIN — and the reason is the failed gate(s). A justified refusal, not a
 shrug. This is the autopilot's safety property: "an agent that can act must
 be able to refuse to act".
 
-The four gates:
+The five gates:
   material    : the anomaly is large enough to deserve an explanation
   localized   : one segment genuinely dominates the contribution
   significant : the leading segment's move is not sampling noise
                 (two-proportion z-test; for sum metrics, where per-unit
                 variance is not observable, fall back to a sample floor)
   clean       : rate and mix effects are separable (bounded interaction)
+  confident   : the combined confidence (concentration × significance ×
+                cleanliness) clears a floor — a move that passes every
+                individual gate only marginally does not pass their product,
+                which is what keeps random noise from being ASSERTed
 """
 from __future__ import annotations
 from dataclasses import dataclass, field
@@ -33,6 +37,8 @@ SIGNIFICANCE_ALPHA = 0.01  # max (two-sided) p-value of the leader's z-test
 Z_CRIT = 2.576             # critical |z| matching alpha=0.01 (two-sided)
 SAMPLE_FLOOR = 1000        # sum-metric fallback: min baseline n of the leader
 INTERACTION_MAX = 0.50     # |interaction|/(|rate|+|mix|): above, mechanism entangled
+CONFIDENCE_MIN = 0.30      # combined confidence floor: each gate may pass only
+                           # marginally, yet their product be too weak to act on
 
 
 @dataclass
@@ -62,6 +68,8 @@ def two_proportion_z(c0: float, n0: float, c1: float, n1: float) -> tuple[float,
     if min(n0, n1) <= 0:
         return 0.0, 1.0
     p_pool = (c0 + c1) / (n0 + n1)
+    if not 0.0 <= p_pool <= 1.0:      # c > n or c < 0: not a valid proportion
+        return 0.0, 1.0
     se = math.sqrt(p_pool * (1.0 - p_pool) * (1.0 / n0 + 1.0 / n1))
     if se == 0.0:
         return 0.0, 1.0
@@ -76,6 +84,7 @@ def evaluate_gates(agg: dict, out: pd.DataFrame, baseline_n: pd.Series | None = 
                    sample_floor: float = SAMPLE_FLOOR,
                    interaction_max: float = INTERACTION_MAX,
                    alpha: float = SIGNIFICANCE_ALPHA,
+                   confidence_min: float = CONFIDENCE_MIN,
                    kind: str = "rate") -> GateReport:
     """
     agg  : output of aggregate() (R0, R1, delta_R, rate, mix, interaction, residual).
@@ -107,7 +116,7 @@ def evaluate_gates(agg: dict, out: pd.DataFrame, baseline_n: pd.Series | None = 
     else:
         leading_n = float("nan")
 
-    # --- the four gates ---
+    # --- the structural gates (confident gate is derived below) ---
     reasons = []
 
     g_material = delta_rel >= material_rel
@@ -140,13 +149,23 @@ def evaluate_gates(agg: dict, out: pd.DataFrame, baseline_n: pd.Series | None = 
     if not g_clean:
         reasons.append(f"entangled mechanism (interaction={inter_share:.2f} > {interaction_max})")
 
-    passed = g_material and g_localized and g_signif and g_clean
-    verdict = "ASSERT" if passed else "ABSTAIN"
-
-    # interpretable confidence: product of factors bounded to 0..1
+    # interpretable confidence: product of factors bounded to 0..1. Computed
+    # BEFORE the verdict so it can act as its own gate: a cause that clears
+    # every individual gate only marginally still has a low product, which is
+    # exactly how random noise sneaks past the four structural gates.
     f_conc = _ramp(concentration, lo=concentration_min, hi=1.0)
     f_clean = 1.0 - min(inter_share, 1.0)
-    confidence = float(f_conc * f_signif * f_clean) if passed else 0.0
+    conf_raw = float(f_conc * f_signif * f_clean)
+
+    g_confident = conf_raw >= confidence_min
+    if not g_confident:
+        reasons.append(
+            f"low combined confidence ({conf_raw:.2f} < {confidence_min}): "
+            f"gates pass only marginally")
+
+    passed = g_material and g_localized and g_signif and g_clean and g_confident
+    verdict = "ASSERT" if passed else "ABSTAIN"
+    confidence = conf_raw if passed else 0.0
 
     return GateReport(
         verdict=verdict, confidence=confidence, leading_segment=leading,

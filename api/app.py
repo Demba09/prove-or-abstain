@@ -139,10 +139,29 @@ def _read_panel(upload: UploadFile, name: str) -> pd.DataFrame:
     for col in ("n", "c"):
         if not pd.api.types.is_numeric_dtype(df[col]):
             raise HTTPException(400, f"{name}: column '{col}' must be numeric")
+    # counts must be non-negative (universal). The c <= n proportion check is
+    # metric-aware and applied later (_validate_rate_counts): it holds for rate
+    # metrics but NOT for sum metrics, where c is a total (revenue) that
+    # legitimately exceeds n (customers).
+    if (df["n"] < 0).any():
+        raise HTTPException(400, f"{name}: column 'n' has negative value(s)")
+    if (df["c"] < 0).any():
+        raise HTTPException(400, f"{name}: column 'c' has negative value(s)")
     if not [c for c in df.columns if c not in _RESERVED]:
         raise HTTPException(400, f"{name}: needs at least one dimension column "
                                  f"besides {sorted(_REQUIRED)}")
     return df
+
+
+def _validate_rate_counts(df: pd.DataFrame, name: str, kinds: dict) -> None:
+    """For rate metrics only, c is a numerator bounded by the population n.
+    A row with c > n reaches the z-test as an invalid proportion (a 500);
+    reject it as a 400 instead. Sum metrics are exempt — there c is a total."""
+    rate = df[~df["metric"].isin(k for k, v in kinds.items() if v == "sum")]
+    over = rate["c"] > rate["n"]
+    if over.any():
+        raise HTTPException(400, f"{name}: {int(over.sum())} rate-metric row(s) "
+                                 f"with c > n (numerator exceeds population)")
 
 
 def _parse_kinds(sum_metrics: str, metrics: list[str]) -> dict:
@@ -171,9 +190,11 @@ def investigate_upload(baseline: UploadFile = File(...),
 
     dims = [c for c in base.columns if c not in _RESERVED]
     metrics = sorted(base["metric"].unique())
+    kinds = _parse_kinds(sum_metrics, metrics)
+    _validate_rate_counts(base, "baseline", kinds)
+    _validate_rate_counts(curr, "current", kinds)
     result = _run_investigation(base, curr, metrics=metrics, dims=dims,
-                                autopilot=autopilot,
-                                metric_kinds=_parse_kinds(sum_metrics, metrics))
+                                autopilot=autopilot, metric_kinds=kinds)
     return {"panel": "upload", **result}
 
 
@@ -196,7 +217,9 @@ def investigate_series(series: UploadFile = File(...),
 
     dims = [c for c in base.columns if c not in _RESERVED]
     metrics = sorted(base["metric"].unique())
+    kinds = _parse_kinds(sum_metrics, metrics)
+    _validate_rate_counts(base, "series (baseline window)", kinds)
+    _validate_rate_counts(curr, "series (current period)", kinds)
     result = _run_investigation(base, curr, metrics=metrics, dims=dims,
-                                autopilot=autopilot,
-                                metric_kinds=_parse_kinds(sum_metrics, metrics))
+                                autopilot=autopilot, metric_kinds=kinds)
     return {"panel": "series", **result}
