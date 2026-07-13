@@ -39,6 +39,41 @@ client = TestClient(app)
 
 
 # -------------------------------------------------------------------- math
+def test_scenario_suite_reproducible_and_labelled():
+    from scenarios import generate_suite
+    a, b = generate_suite(0), generate_suite(0)
+    assert len(a) == 45
+    labels = {}
+    for s in a:
+        labels[s.label] = labels.get(s.label, 0) + 1
+    assert labels == {"localized": 9, "diffuse": 9, "mixshift": 9,
+                      "noise": 9, "small_sample": 9}
+    # byte-identical regeneration off the same seed
+    for sa, sb in zip(a, b):
+        assert sa.baseline.equals(sb.baseline) and sa.current.equals(sb.current)
+    # a different seed gives different data
+    c = generate_suite(1)
+    assert not a[0].current.equals(c[0].current)
+
+
+def test_scenario_ground_truth_matches_agent():
+    # Sanity: our agent asserts exactly on the localized scenarios and never
+    # invents a cause on the no-cause ones (a real, offline result).
+    from scenarios import generate_suite
+    from graph import APP
+    invented = 0
+    for sc in generate_suite(0):
+        state = {"baseline": sc.baseline, "current": sc.current,
+                 "metrics": ["conversion"], "metric_kinds": {}, "dims": sc.dims,
+                 "autopilot_enabled": False, "trace": []}
+        verdict = APP.invoke(state).get("verdict")
+        if sc.should_assert:
+            assert verdict == "ASSERT", f"{sc.name}: expected ASSERT, got {verdict}"
+        elif verdict == "ASSERT":
+            invented += 1
+    assert invented == 0, f"agent invented a cause on {invented} no-cause scenarios"
+
+
 def test_decompose_matches_oracle():
     cols = ["rate", "mix", "interaction", "contribution"]
     for curr in SCENARIOS.values():
