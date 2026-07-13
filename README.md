@@ -64,8 +64,8 @@ floor of 1000.
 
 ## Quickstart
 
-Requires Python 3.11+ (the pinned pandas/numpy versions do not install on
-older interpreters; developed and tested on 3.12).
+Requires Python 3.12+ (the pinned numpy version does not install on 3.11 or
+older; developed and tested on 3.12).
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
@@ -77,8 +77,8 @@ pytest -q                 # math vs. oracle, gate verdicts, API behaviour
 uvicorn api.app:app --reload
 ```
 
-Open http://localhost:8000 for the demo page — run the built-in scenarios or
-upload your own CSVs — or use the API directly:
+Open http://localhost:8000 for the demo page — run the built-in scenarios,
+ask a free-text question, or upload your own CSVs — or use the API directly:
 
 ```bash
 curl -X POST localhost:8000/investigate \
@@ -92,7 +92,13 @@ GET  /                     demo page
 POST /investigate
   body:   { "panel": "clean" | "diffuse" | "mixshift" | "deep", "autopilot": false }
   return: { verdict, confidence, root_cause, gates, drilldown,
-            action, report, speculations, trace }
+            action, report, speculations, llm, trace }
+POST /investigate/query
+  body:   { "query": "<free-text question>", "autopilot": false }
+  Qwen SELECTS one of the four built-in panels/metrics from the question
+  (llm.route_query, guarded to the supplied options only — see "Using Qwen
+  for real" below); the same deterministic pipeline then runs unchanged.
+  return: { panel, routing: {panel, metric, reason}, ...same shape as above }
 POST /investigate/upload
   multipart: baseline=<csv>, current=<csv>, autopilot=<bool>, sum_metrics=<csv names>
   same return shape
@@ -101,6 +107,32 @@ POST /investigate/series
   last period vs. a rolling baseline pooled over the prior `window` periods
 GET  /health
 ```
+
+## Using Qwen for real (not just mock mode)
+
+`llm.py` calls Qwen (`qwen-plus` by default) via DashScope's OpenAI-compatible
+endpoint for exactly three things: ordering which dimension to try
+(`plan_dimensions`), routing a free-text question to a panel
+(`route_query`), and phrasing the final report/speculations — never a
+number, never a verdict.
+
+- **Get a key**: a `DASHSCOPE_API_KEY` from Alibaba Cloud Model Studio.
+  `export DASHSCOPE_API_KEY=...` (or put it in `.env`), then unset
+  `QWEN_MOCK` (or leave it unset).
+- **Region matters**: international accounts use the default base URL
+  (`https://dashscope-intl.aliyuncs.com/compatible-mode/v1`); mainland China
+  accounts must set `QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`.
+  A key/endpoint mismatch fails the network call — and the client falls back
+  to the deterministic template so the pipeline still runs. That fallback is
+  a safety property, but it can silently look identical to mock mode.
+- **Verify before demoing**: run `python check_qwen.py` for a one-shot
+  real round trip, and check the `llm` field in any `/investigate*`
+  response (`{"model": "qwen-plus", "mode": "real" | "mock" | "fallback"}`)
+  — `mode` is also appended to `report` on the demo page and logged in
+  `trace` (e.g. `hypothesizer: dimension plan [qwen:qwen-plus] -> [...]`,
+  or `[fallback] (<error>)` if a real call failed and the template kicked
+  in). This makes a live Qwen call and a mock/fallback run distinguishable
+  in the API output itself, not just in the source code.
 
 The endpoint builds the initial state, runs the graph, and serializes the
 result; the service layer contains no analysis logic.

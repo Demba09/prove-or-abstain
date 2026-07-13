@@ -85,6 +85,13 @@
     </div>
     <p class="hint">clean: one segment collapses &rarr; ASSERT &nbsp;·&nbsp; diffuse: uniform drop &rarr; ABSTAIN &nbsp;·&nbsp; mixshift: mix and rates entangled &rarr; ABSTAIN &nbsp;·&nbsp; deep: one cell collapses &rarr; ASSERT, then drills down</p>
     <div class="divider"></div>
+    <p class="hint">Or ask in plain English — Qwen picks which panel to investigate (never computes anything itself):</p>
+    <div class="row">
+      <input type="text" id="query" placeholder="why did conversion drop uniformly last week?" style="flex:1; min-width:240px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font:inherit;">
+      <button class="secondary" onclick="runQuery()">ask</button>
+    </div>
+    <p id="routing" class="hint" style="display:none;"></p>
+    <div class="divider"></div>
     <p class="hint">Or investigate your own data — two CSVs with columns <code>metric, &lt;dimensions...&gt;, n, c</code> (see <code>examples/</code>):</p>
     <div class="row">
       <input type="file" id="baseline" accept=".csv"> <span class="hint">baseline</span>
@@ -144,6 +151,17 @@ function runPanel(panel) {
   });
 }
 
+function runQuery() {
+  const query = $('query').value.trim();
+  if (!query) return fail('Type a question first.');
+  $('routing').style.display = 'none';
+  call('/investigate/query', {
+    method: 'POST',
+    headers: {'content-type': 'application/json'},
+    body: JSON.stringify({query, autopilot: $('autopilot').checked}),
+  });
+}
+
 function runUpload() {
   const base = $('baseline').files[0], curr = $('current').files[0];
   if (!base || !curr) return fail('Select both a baseline CSV and a current CSV.');
@@ -156,6 +174,15 @@ function runUpload() {
 
 function render(b) {
   $('result').style.display = 'block';
+
+  if (b.routing) {
+    $('routing').style.display = 'block';
+    $('routing').innerHTML = `routed to panel <b>${b.panel}</b>` +
+      (b.routing.metric ? ` · metric <b>${b.routing.metric}</b>` : '') +
+      (b.routing.reason ? ` — ${b.routing.reason}` : '');
+  } else {
+    $('routing').style.display = 'none';
+  }
 
   const v = b.verdict || 'NO_ANOMALY';
   $('verdict').textContent = v;
@@ -192,6 +219,7 @@ function render(b) {
   if (b.action) $('action').innerHTML = `<b>${b.action.kind}</b> — ${b.action.detail}`;
 
   $('report').textContent = b.report || '';
+  if (b.llm) $('report').textContent += `  [${b.llm.mode === 'real' ? 'Qwen: ' + b.llm.model : b.llm.mode}]`;
 
   const specs = b.speculations || [];
   $('spec').style.display = specs.length ? 'block' : 'none';
