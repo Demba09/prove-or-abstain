@@ -124,6 +124,21 @@ def test_investigate_verdicts():
         assert body["verdict"] == want, f"{panel}: {body['trace']}"
 
 
+def test_ask_routes_question_to_metric():
+    # A plain-language question is parsed (offline heuristic in mock) to the
+    # right metric, then the deterministic pipeline runs — Qwen frames, never
+    # decides.
+    b = client.post("/investigate/ask",
+                    json={"question": "why did sales drop this weekend?",
+                          "panel": "clean"}).json()
+    assert b["parsed"]["metric"] == "conversion"
+    assert b["verdict"] == "ASSERT"
+    b2 = client.post("/investigate/ask",
+                     json={"question": "what happened to signups?",
+                           "panel": "clean"}).json()
+    assert b2["parsed"]["metric"] == "activation"
+
+
 def test_unified_state_has_inputs_and_trace():
     # A2: one call returns the raw per-segment inputs (base vs current), the
     # ordered dimension trace with each rejection reason, the decomposition and

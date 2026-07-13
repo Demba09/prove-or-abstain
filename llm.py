@@ -127,6 +127,56 @@ class QwenClient:
         order += [d for d in dims if d not in order]     # re-add anything dropped
         return order or list(dims)
 
+    # --- entry point: a human question -> a structured investigation spec ---
+    def parse_question(self, question: str, metrics: list[str],
+                       dims: list[str]) -> dict:
+        """Turn a plain-language question ("why did sales drop last week?") into
+        a typed spec: which metric to investigate and which dimensions to weigh
+        first. This is a framing step at the ENTRANCE — it never decides the
+        verdict, which stays deterministic once the metric is chosen. Mock mode
+        and any failure fall back to a keyword heuristic, so the path works
+        offline."""
+        heuristic = {"metric": _match_metric(question, metrics),
+                     "focus_dims": [d for d in dims if d.lower() in question.lower()],
+                     "notes": ""}
+        if self.mock:
+            return heuristic
+        system = (
+            "Turn the user's plain-language question about a business metric into "
+            "a structured investigation request. Pick the ONE metric it is about "
+            "from the provided list, and any dimensions it explicitly mentions. "
+            "Choose only from the given names; decide nothing about the cause."
+        )
+        tool = {
+            "type": "function",
+            "function": {
+                "name": "make_investigation",
+                "description": "Which metric to investigate and which dimensions to weigh first.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "metric": {"type": "string", "enum": list(metrics)},
+                        "focus_dims": {"type": "array",
+                                       "items": {"type": "string", "enum": list(dims)}},
+                        "notes": {"type": "string"},
+                    },
+                    "required": ["metric"],
+                },
+            },
+        }
+        user = json.dumps({"question": question, "metrics": list(metrics),
+                           "dimensions": list(dims)}, ensure_ascii=False)
+        try:
+            out = self.complete_tool(system, user, tool, max_tokens=150)
+            metric = out.get("metric")
+            if metric not in metrics:
+                return heuristic
+            return {"metric": metric,
+                    "focus_dims": [d for d in out.get("focus_dims", []) if d in dims],
+                    "notes": str(out.get("notes", ""))[:300]}
+        except Exception:
+            return heuristic
+
     # --- setup aid: suggest how to frame an unknown CSV (decides nothing) ---
     def suggest_setup(self, columns: list[str], sample_rows: list[dict]) -> dict | None:
         """Given the columns and a few sample rows of an uploaded CSV, PROPOSE
@@ -235,6 +285,26 @@ class QwenClient:
             return self.complete(system, json.dumps(payload, ensure_ascii=False))
         except Exception:
             return template_report(payload)
+
+
+_METRIC_SYNONYMS = {
+    "conversion": ("conversion", "convert", "sales", "orders", "order",
+                   "checkout", "buy", "purchase", "revenue"),
+    "activation": ("activation", "activate", "signup", "sign-up", "onboard"),
+}
+
+
+def _match_metric(question: str, metrics: list[str]) -> str:
+    """Pick the metric a question is about by name, then by synonym, then the
+    first available — a deterministic fallback for mock mode / failures."""
+    q = (question or "").lower()
+    for m in metrics:
+        if m.lower() in q:
+            return m
+    for m in metrics:
+        if any(w in q for w in _METRIC_SYNONYMS.get(m.lower(), ())):
+            return m
+    return metrics[0] if metrics else ""
 
 
 def template_report(p: dict) -> str:

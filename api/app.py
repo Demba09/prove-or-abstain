@@ -333,6 +333,29 @@ def _parse_kinds(sum_metrics: str, metrics: list[str]) -> dict:
     return kinds
 
 
+class AskRequest(BaseModel):
+    question: str
+    panel: Literal["clean", "diffuse", "mixshift", "deep"] = "clean"
+    autopilot: bool = False
+
+
+@app.post("/investigate/ask")
+def investigate_ask(req: AskRequest) -> dict:
+    """Plain-language entry point: a question like "why did sales drop last
+    week?" is parsed (by Qwen, with an offline keyword fallback) into which
+    metric to investigate — then the same deterministic pipeline runs. Qwen
+    frames the question; it never decides the answer."""
+    from llm import get_client
+    metrics, dims = ["conversion", "activation"], ["device", "segment"]
+    spec = get_client().parse_question(req.question, metrics, dims)
+    target = spec.get("metric") or metrics[0]
+    result = _run_investigation(
+        BASELINE, _PANELS[req.panel],
+        metrics=[target],          # investigate the metric the question is about
+        dims=dims, autopilot=req.autopilot)
+    return {"panel": req.panel, "question": req.question, "parsed": spec, **result}
+
+
 @app.post("/investigate/upload")
 def investigate_upload(baseline: UploadFile = File(...),
                        current: UploadFile = File(...),

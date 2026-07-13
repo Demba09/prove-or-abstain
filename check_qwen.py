@@ -38,4 +38,10 @@ order = client.plan_dimensions("conversion", -0.15, dims)
 print(f"ranked in  : {(time.perf_counter() - t0) * 1000:.0f} ms")
 print(f"order      : {order}")
 assert sorted(order) == sorted(dims), "function call must return a permutation"
-print("\nOK — key, endpoint and function-calling all working.")
+
+print("\ntesting the natural-language entry point (parse_question)...")
+spec = client.parse_question("why did our sales drop last weekend?",
+                             ["conversion", "activation"], dims)
+print(f"parsed     : {spec}")
+assert spec["metric"] in ("conversion", "activation")
+print("\nOK — key, endpoint, function-calling and NL parsing all working.")

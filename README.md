@@ -145,7 +145,16 @@ deterministic mock (`QWEN_MOCK=1`) runs the same pipeline offline.
 > `QWEN_MOCK=1 pytest -q -k independent_of_the_llm` demonstrates it in one
 > command.
 
-### Why Qwen
+### Why Qwen (and where it is deliberately absent)
+
+Both this tool and a plain-prompt assistant run on the **same** Qwen model; the
+difference is not the model, it's what we let it decide. Qwen is indispensable
+at the **two ends** — turning a plain-language question into a structured
+request (`why did sales drop?` → *investigate conversion*), and turning the
+proven figures into a readable note — and **deliberately absent from the
+middle**, where the verdict is decided by arithmetic. That boundary is the
+whole design: the LLM frames and phrases; the math judges.
+
 
 The dimension-ranking step is a Qwen **function call**: the model answers
 through a `rank_dimensions` tool whose JSON schema constrains the output to a
@@ -228,6 +237,10 @@ POST /investigate
   body:   { "panel": "clean" | "diffuse" | "mixshift" | "deep", "autopilot": false }
   return: { verdict, confidence, root_cause, gates, drilldown,
             action, report, speculations, trace }
+POST /investigate/ask
+  body:   { "question": "why did sales drop last week?", "panel": "clean" }
+  parses the question to a metric (Qwen, offline keyword fallback), then runs
+  the deterministic pipeline; returns the verdict plus the parsed request
 POST /investigate/upload
   multipart: baseline=<csv>, current=<csv>, autopilot=<bool>, sum_metrics=<csv names>
   same return shape
