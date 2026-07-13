@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="fr">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>prove-or-abstain — du diffus au localisé</title>
+<title>Sales dropped — one channel, or the whole store?</title>
 <style>
   :root {
     --bg:#f5f6f9; --card:#fff; --ink:#0f172a; --muted:#5b6472; --line:#e2e8f0;
@@ -53,8 +53,8 @@
 </head>
 <body>
 <main>
-  <h1>Une seule cause, ou juste du bruit&nbsp;?</h1>
-  <p class="sub">Glissez le curseur&nbsp;: la même baisse de conversion, d'abord répartie sur tous les segments, puis concentrée sur un seul. Regardez le verdict basculer — à un point net, pas progressivement.</p>
+  <h1>One channel broke, or is the whole store just soft?</h1>
+  <p class="sub">You run an online store. This weekend, orders dropped. Before you act, one question: did the drop come from one channel, or from everywhere at once? Drag the slider and watch the tool decide — or refuse to.</p>
 
   <div class="card">
     <div class="verdict-row">
@@ -66,35 +66,36 @@
     <div class="bars" id="bars"></div>
 
     <div class="slider-wrap">
-      <input type="range" id="slider" min="0" max="20" value="0" step="1" aria-label="concentration">
-      <div class="scale"><span>réparti sur tous les segments</span><span>concentré sur un seul</span></div>
+      <input type="range" id="slider" min="0" max="20" value="0" step="1" aria-label="where the drop comes from">
+      <div class="scale"><span>the drop is everywhere</span><span>from one channel</span></div>
     </div>
     <p class="flip-note" id="flipnote"></p>
   </div>
 
-  <footer>Chaque verdict est décidé côté serveur par les mathématiques (pandas/numpy) — le curseur ne fait que lire une série pré-calculée. <a href="/">← démo complète</a></footer>
+  <footer>The answer is computed by the server, not guessed: the slider just steps through pre-computed cases. <a href="/">← see the full demo</a></footer>
 </main>
 
 <script>
 const $ = id => document.getElementById(id);
 let SERIES = [];
 
-const SEG_LABELS = {organic:"organique", paid:"payant", referral:"parrainage", email:"e-mail", social:"réseaux"};
+const SEG_LABELS = {organic:"Google search", paid:"paid ads",
+  referral:"partner sites", email:"email", social:"social media"};
 
 function render(i) {
   const p = SERIES[i];
   if (!p) return;
   const isAssert = p.verdict === "ASSERT";
   const badge = $('badge');
-  badge.textContent = isAssert ? "CAUSE PROUVÉE" : "S'ABSTIENT";
+  badge.textContent = isAssert ? "WE FOUND IT" : "NOT SURE YET";
   badge.className = "badge " + (isAssert ? "assert" : "abstain");
   $('cause').innerHTML = isAssert && p.root_cause
-    ? `cause&nbsp;: <b>${SEG_LABELS[p.root_cause.segment] || p.root_cause.segment}</b> · confiance ${p.confidence.toFixed(2)}`
-    : `aucune cause localisée · segment dominant à ${(p.top_share*100).toFixed(0)}%`;
+    ? `the channel to blame: <b>${SEG_LABELS[p.root_cause.segment] || p.root_cause.segment}</b>`
+    : `no channel clearly stands out`;
 
   $('caption').innerHTML = isAssert
-    ? `Un segment concentre <b>${(p.top_share*100).toFixed(0)}%</b> du mouvement — assez pour que l'agent affirme une cause et propose une action ciblée.`
-    : `La baisse est étalée (segment dominant&nbsp;: ${(p.top_share*100).toFixed(0)}%). Aucun segment ne se détache&nbsp;: l'agent refuse d'inventer un coupable.`;
+    ? `One channel carries <b>${(p.top_share*100).toFixed(0)}%</b> of the drop. That's clear enough to say exactly what to look at — and act on it.`
+    : `The drop is spread across every channel (the worst-hit one carries just ${(p.top_share*100).toFixed(0)}%). Nothing stands out: the tool refuses to blame a channel at random.`;
 
   const bars = $('bars');
   bars.innerHTML = '';
@@ -124,7 +125,7 @@ fetch('/sweep?points=21').then(r => r.json()).then(b => {
   const flip = findFlip();
   if (flip > 0) {
     const c = SERIES[flip].top_share;
-    $('flipnote').innerHTML = `<b>Bascule</b> quand le segment dominant dépasse ~${(c*100).toFixed(0)}% du mouvement. En-dessous, l'agent s'abstient ; au-dessus, il prouve. Ce seuil est net et reproductible — il ne dépend pas du hasard.`;
+    $('flipnote').innerHTML = `The verdict flips when one channel passes ~<b>${(c*100).toFixed(0)}%</b> of the drop. Below that, the tool says "not sure yet" instead of guessing; above, it says so. This threshold doesn't move from one run to the next — it's a rule, not a hunch.`;
   }
   render(0);
 }).catch(e => { $('caption').textContent = 'Impossible de charger la série : ' + e.message; });
