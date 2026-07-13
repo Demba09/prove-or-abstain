@@ -295,13 +295,14 @@ docker build -t prove-or-abstain .
 docker run -p 8000:8000 -e DASHSCOPE_API_KEY=... prove-or-abstain
 ```
 
-Secrets are injected at runtime; `.env` is excluded from the image. Without
-a key the service falls back to mock mode; set `ACTION_WEBHOOK_URL` (also at
-runtime) to dispatch autopilot `EXECUTE` actions to a real endpoint. For
-Alibaba Cloud, push an
-amd64 image to Container Registry and run it on Function Compute
-(custom-container runtime, port 8000, HTTP trigger) — `/health` serves as
-the probe endpoint.
+Secrets are injected at runtime; `.env` is excluded from the image and the
+container runs as an unprivileged user. Without a key the service falls back to
+mock mode; set `ACTION_WEBHOOK_URL` (also at runtime) to dispatch autopilot
+`EXECUTE` actions to a real endpoint. For Alibaba Cloud, push an amd64 image to
+Container Registry and run it on Function Compute (custom-container runtime,
+port 8000, HTTP trigger) — `/health` serves as the probe endpoint. The helper
+`deploy/aliyun.sh` builds and pushes the image; **[`docs/deploy.md`](docs/deploy.md)**
+is the click-by-click.
 
 ```bash
 docker buildx build --platform linux/amd64 \

@@ -10,6 +10,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # The code next (.dockerignore excludes .env, .venv, tests, data, caches).
 COPY . .
 
+# Run as an unprivileged user (the app writes nothing to disk at runtime).
+RUN useradd --create-home --uid 10001 app && chown -R app /app
+USER app
+
 # Secrets are injected at runtime only:
 #   docker run -e DASHSCOPE_API_KEY=...   (or the Alibaba Cloud env panel)
 # Without a key, llm.py falls back to mock mode: the image also runs offline.
