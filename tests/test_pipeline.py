@@ -268,3 +268,32 @@ def test_speculations_only_on_assert():
     abstain_body = client.post("/investigate", json={"panel": "diffuse"}).json()
     assert len(assert_body["speculations"]) >= 1
     assert abstain_body["speculations"] == []
+
+
+# --------------------------------------------------------------- llm visibility
+def test_llm_mode_reported_in_mock():
+    body = client.post("/investigate", json={"panel": "clean"}).json()
+    assert body["llm"] == {"model": "qwen-plus", "mode": "mock"}
+    assert any("[mock]" in t for t in body["trace"])
+
+
+# ----------------------------------------------------------- natural-language
+def test_query_routes_to_matching_panel():
+    body = client.post("/investigate/query",
+                       json={"query": "every segment dropped by the same amount, "
+                                     "uniform decline"}).json()
+    assert body["panel"] == "diffuse"
+    assert body["verdict"] == "ABSTAIN"
+    assert body["routing"]["panel"] == "diffuse"
+
+
+def test_query_rejects_empty():
+    r = client.post("/investigate/query", json={"query": "   "})
+    assert r.status_code == 400
+
+
+def test_query_never_picks_outside_panels():
+    # gibberish query: mock router must still land on a valid panel, never
+    # crash or invent a name outside the supplied options.
+    body = client.post("/investigate/query", json={"query": "asdkjhaskjdh"}).json()
+    assert body["panel"] in {"clean", "diffuse", "mixshift", "deep"}
