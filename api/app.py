@@ -248,17 +248,21 @@ def investigate_suggest(file: UploadFile = File(...)) -> dict:
 @app.post("/investigate/series")
 def investigate_series(series: UploadFile = File(...),
                        window: int | None = Form(None),
+                       seasonal_period: int | None = Form(None),
                        autopilot: bool = Form(False),
                        sum_metrics: str = Form("")) -> dict:
     """One multi-period CSV (a 'period' column). The last period is
     investigated against a rolling baseline: the preceding `window`
-    periods pooled together (all of them if window is absent)."""
+    periods pooled together (all of them if window is absent). With
+    `seasonal_period=k`, only the in-phase preceding periods are pooled — a
+    day vs the same weekday in prior weeks for k=7 on a daily series."""
     panel = _read_panel(series, "series")
     if "period" not in panel.columns:
         raise HTTPException(400, "series: missing required column 'period'")
 
     try:
-        base, curr = split_series(panel, window=window)
+        base, curr = split_series(panel, window=window,
+                                  seasonal_period=seasonal_period)
     except ValueError as exc:
         raise HTTPException(400, f"series: {exc}")
 

@@ -174,8 +174,10 @@ POST /investigate/suggest
   return: { columns, default:{dimensions,sum_metrics,metrics}, suggestion }
   framing aid only — proposes a setup for the user to confirm, runs nothing
 POST /investigate/series
-  multipart: series=<csv with a 'period' column>, window=<int, optional>
-  last period vs. a rolling baseline pooled over the prior `window` periods
+  multipart: series=<csv with a 'period' column>, window=<int, optional>,
+             seasonal_period=<int, optional>
+  last period vs. a rolling baseline pooled over the prior `window` periods;
+  with seasonal_period=k, pooled over the in-phase prior periods only
 GET  /health
 ```
 
@@ -252,7 +254,16 @@ curl -X POST localhost:8000/investigate/upload \
 # time series: one CSV with a 'period' column, rolling pooled baseline
 curl -X POST localhost:8000/investigate/series \
   -F series=@examples/series_clean.csv -F window=4
+
+# seasonal baseline: a daily series with a weekly cycle — compare the last day
+# to the same weekday in prior weeks (k=7) instead of a naive pool.
+curl -X POST localhost:8000/investigate/series \
+  -F series=@examples/series_seasonal.csv -F seasonal_period=7
 ```
+
+In `examples/series_seasonal.csv` the last day is a normal weekend: a naive
+pooled baseline mixes in weekday rates and cries anomaly (−36%), while
+`seasonal_period=7` compares like-for-like and correctly reports no anomaly.
 
 Metrics named in `sum_metrics` are decomposed as sums (volume/rate split,
 e.g. revenue = customers × average basket) instead of rates.
@@ -301,8 +312,8 @@ docker buildx build --platform linux/amd64 \
 
 - No live data connectors yet — data comes in as CSV uploads or the built-in
   panels.
-- The rolling baseline pools prior periods; there is no seasonality or trend
-  modelling.
+- The rolling baseline supports a fixed seasonal period (e.g. weekly), but no
+  automatic seasonality detection or trend modelling.
 - Drill-down goes one level deep (winning segment × one other dimension).
 - Action dispatch is a single generic webhook (`ACTION_WEBHOOK_URL`); there
   are no first-class connectors (Slack/Jira/Stripe) or a closed loop that

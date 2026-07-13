@@ -440,6 +440,44 @@ def test_series_requires_period_column():
     assert "period" in r.json()["detail"]
 
 
+# ----------------------------------------------------- seasonal baseline
+def test_split_series_seasonal_picks_in_phase_periods():
+    from panels import split_series
+    # 15 periods 0..14; seasonal_period=7 -> baseline = {0, 7} (same phase as 14).
+    rows = [{"metric": "m", "seg": "a", "period": p, "n": 100, "c": 10}
+            for p in range(15)]
+    panel = pd.DataFrame(rows)
+    base, _ = split_series(panel, seasonal_period=7)
+    # pooled n reflects exactly the two in-phase periods (2 * 100)
+    assert base["n"].sum() == 200
+
+
+def test_seasonal_baseline_avoids_false_alarm():
+    # A daily series with a strong weekly cycle (weekday 7%, weekend 4%) whose
+    # last day is a NORMAL weekend. A naive pooled baseline mixes weekdays in
+    # and flags a spurious drop; a seasonal (k=7) baseline compares like-for-
+    # like and finds no anomaly.
+    with open("examples/series_seasonal.csv", "rb") as fh:
+        raw = fh.read()
+
+    def run(**data):
+        return client.post("/investigate/series",
+                           files={"series": ("s.csv", raw, "text/csv")},
+                           data=data).json()
+
+    assert run()["verdict"] != "NO_ANOMALY"                 # naive: false alarm
+    assert run(seasonal_period="7")["verdict"] == "NO_ANOMALY"  # seasonal: correct
+
+
+def test_series_rejects_bad_seasonal_period():
+    from panels import make_series
+    r = client.post("/investigate/series",
+                    files={"series": ("series.csv", _csv(make_series()), "text/csv")},
+                    data={"seasonal_period": "0"})
+    assert r.status_code == 400
+    assert "seasonal_period" in r.json()["detail"]
+
+
 # --------------------------------------------------------------- speculation
 def test_speculations_only_on_assert():
     assert_body = client.post("/investigate", json={"panel": "clean"}).json()

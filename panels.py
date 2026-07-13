@@ -109,20 +109,40 @@ def project(panel: pd.DataFrame, metric: str, dim: str) -> pd.DataFrame:
 
 # --------------------------------------------------------------- time series
 def split_series(panel: pd.DataFrame, window: int | None = None,
-                 period_col: str = "period") -> tuple[pd.DataFrame, pd.DataFrame]:
+                 period_col: str = "period",
+                 seasonal_period: int | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Split a multi-period long panel into (baseline, current).
 
     current  = the last period.
-    baseline = the `window` preceding periods (all of them if None), POOLED by
-               summing n and c per cell — a rolling baseline, more robust than
-               a single reference period.
+    baseline = preceding periods, POOLED by summing n and c per cell.
+       - default: the `window` immediately preceding periods (all if None).
+       - seasonal_period=k: only the IN-PHASE preceding periods — those whose
+         position is a multiple of k before the last one (e.g. k=7 on a daily
+         series compares a day to the same weekday in prior weeks). `window`
+         then caps how many in-phase periods are pooled. Phase is by position
+         in the sorted periods, so it works for any period label as long as
+         periods are evenly spaced.
     """
     if window is not None and window < 1:
         raise ValueError("window must be >= 1")
+    if seasonal_period is not None and seasonal_period < 1:
+        raise ValueError("seasonal_period must be >= 1")
     periods = sorted(panel[period_col].unique())
     if len(periods) < 2:
         raise ValueError("a series panel needs at least 2 periods")
-    base_periods = periods[:-1] if window is None else periods[-1 - window:-1]
+
+    last = len(periods) - 1
+    if seasonal_period is not None:
+        idxs = [i for i in range(last) if (last - i) % seasonal_period == 0]
+        if not idxs:
+            raise ValueError(f"no in-phase baseline period for seasonal_period="
+                             f"{seasonal_period} (need periods {seasonal_period} "
+                             f"apart before the last)")
+        if window is not None:
+            idxs = idxs[-window:]
+        base_periods = [periods[i] for i in idxs]
+    else:
+        base_periods = periods[:-1] if window is None else periods[-1 - window:-1]
 
     keys = [col for col in panel.columns if col not in (period_col, "n", "c")]
     base = (panel[panel[period_col].isin(base_periods)]
