@@ -74,6 +74,15 @@ explicitly labelled as unverified speculation. It never produces a number and
 never decides a verdict, so the verdict is identical with or without it — a
 deterministic mock (`QWEN_MOCK=1`) runs the same pipeline offline.
 
+> **The LLM boundary, proven.** This is not just a claim in prose. A test
+> (`test_verdict_is_independent_of_the_llm`) runs the same panels through the
+> full pipeline twice — once with the deterministic mock, once with a
+> divergent Qwen stand-in that reverses the dimension order and returns
+> different text — and asserts the verdict, root cause, confidence and gate
+> numbers are **bit-for-bit identical**. The LLM provably moves only words.
+> `QWEN_MOCK=1 pytest -q -k independent_of_the_llm` demonstrates it in one
+> command.
+
 ### Why Qwen
 
 The dimension-ranking step is a Qwen **function call**: the model answers

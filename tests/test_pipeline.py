@@ -206,6 +206,64 @@ def test_upload_rejects_missing_column():
     assert "missing required column" in r.json()["detail"]
 
 
+# --------------------------------------------------- the LLM boundary, proven
+class _DivergentQwen:
+    """A stand-in Qwen that answers DIFFERENTLY from the deterministic mock:
+    reversed dimension order, different prose. If the verdict still comes out
+    identical, the LLM provably moves nothing but words."""
+    mock = False
+    model = "divergent-stub"
+
+    def plan_dimensions(self, metric, delta_rel, dims):
+        return list(reversed(dims))
+
+    def write_report(self, payload):
+        return "DIVERGENT PROSE — wording differs, numbers do not."
+
+    def write_executive_summary(self, payload):
+        return "divergent summary"
+
+    def speculate_causes(self, payload):
+        return ["a divergent speculation?"]
+
+
+def _run_panel(current, metrics=("conversion", "activation"), dims=("device", "segment")):
+    from graph import APP
+    from panels import BASELINE
+    state = {"baseline": BASELINE, "current": current, "metrics": list(metrics),
+             "metric_kinds": {}, "dims": list(dims), "autopilot_enabled": False,
+             "trace": []}
+    return APP.invoke(state)
+
+
+def _verdict_fingerprint(final):
+    """Everything that MUST be identical regardless of the LLM: verdict, cause,
+    confidence, and the winning dimension's gate numbers."""
+    win = final.get("winning_report")
+    return (
+        final.get("verdict"),
+        final.get("winning_dim"),
+        None if win is None else win.leading_segment,
+        round(final.get("confidence") or 0.0, 6),
+        None if win is None else round(win.concentration, 6),
+        None if win is None else round(win.interaction_share, 6),
+    )
+
+
+def test_verdict_is_independent_of_the_llm(monkeypatch):
+    # THE thesis, enforced: the same panel yields the same verdict whether the
+    # LLM is the deterministic mock or a divergent real-shaped client.
+    import llm
+    from panels import CLEAN, DIFFUSE
+    for current in (CLEAN, DIFFUSE):
+        monkeypatch.setattr(llm, "_CLIENT", None)          # deterministic mock
+        mock_fp = _verdict_fingerprint(_run_panel(current))
+        monkeypatch.setattr(llm, "_CLIENT", _DivergentQwen())
+        div_fp = _verdict_fingerprint(_run_panel(current))
+        assert mock_fp == div_fp, f"LLM changed the verdict: {mock_fp} != {div_fp}"
+    monkeypatch.setattr(llm, "_CLIENT", None)
+
+
 def test_upload_rejects_mismatched_columns():
     from panels import BASELINE, CLEAN
     r = client.post("/investigate/upload", files={
