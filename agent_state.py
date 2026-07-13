@@ -74,4 +74,5 @@ class AgentState(TypedDict, total=False):
     actions: list[Action]
     report: str
     speculations: list[str]         # LLM business hypotheses, labelled speculation
+    llm: dict                       # {"model": ..., "mode": "mock"|"real"|"fallback"}
     trace: list[str]                # readable investigation log
