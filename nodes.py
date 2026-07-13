@@ -302,6 +302,20 @@ def reporter(state: AgentState) -> dict:
                 "best_concentration": best,
             })
 
-    text = get_client().write_report(payload)
+    client = get_client()
+    text = client.write_report(payload)
+
+    # executive summary over ALL detected anomalies (the detector may flag more
+    # than the one investigated). Numbers straight from state; the LLM phrases.
+    anomalies = [{"metric": a.metric, "delta_rel": a.delta_rel,
+                  "signed_rel": (a.R1 - a.R0) / (abs(a.R0) + 1e-12)}
+                 for a in state.get("anomalies", [])]
+    exec_payload = {"verdict": verdict, "metric": metric, "anomalies": anomalies}
+    if verdict == "ASSERT":
+        rep = state["winning_report"]
+        exec_payload["root_cause"] = f"{state['winning_dim']}={rep.leading_segment}"
+    executive_summary = client.write_executive_summary(exec_payload)
+
     return {"report": text, "speculations": speculations,
+            "executive_summary": executive_summary,
             "trace": _log(state, f"reporter: {verdict} written.")}

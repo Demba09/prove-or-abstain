@@ -143,6 +143,8 @@
       <span class="meta" id="rootcause"></span>
     </div>
 
+    <p class="report" id="exec" style="font-style:normal;font-weight:500;display:none"></p>
+
     <div class="graph" id="graph"></div>
     <p class="gloop" id="gloop"></p>
 
@@ -377,6 +379,10 @@ function render(b) {
   $('rootcause').innerHTML = b.root_cause
     ? `root cause <b>${b.root_cause.dimension} = ${b.root_cause.segment}</b>`
     : (v === 'ABSTAIN' ? 'no localized cause' : '');
+
+  const ex = b.executive_summary;
+  $('exec').style.display = ex ? 'block' : 'none';
+  if (ex) $('exec').textContent = ex;
 
   renderGraph(b);
   renderGates(b);

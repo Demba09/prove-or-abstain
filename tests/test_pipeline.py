@@ -173,6 +173,16 @@ def test_upload_roundtrip_matches_panels():
         assert body["panel"] == "upload" and body["verdict"] == want
 
 
+def test_executive_summary_present_and_counts_anomalies():
+    # The reporter emits an executive summary over ALL detected anomalies; in
+    # mock mode it is the deterministic template, non-empty and naming the
+    # investigated metric.
+    body = client.post("/investigate", json={"panel": "clean"}).json()
+    summary = body["executive_summary"]
+    assert summary and "conversion" in summary
+    assert "investigated" in summary
+
+
 def test_suggest_returns_default_and_no_verdict():
     # The framing endpoint returns the deterministic default schema and, in
     # mock mode, no Qwen suggestion. It runs no investigation (no verdict).

@@ -201,6 +201,25 @@ class QwenClient:
         except Exception:
             return template_speculations(payload)
 
+    # --- use 2b: an executive summary over ALL detected anomalies ---
+    def write_executive_summary(self, payload: dict) -> str:
+        """Phrase a short standing-back summary: how many metrics moved
+        materially, which one was investigated and to what verdict. Computes
+        nothing — every figure is already in the payload. Mock / error ->
+        deterministic template."""
+        if self.mock:
+            return template_executive_summary(payload)
+        system = (
+            "Write a 2 to 3 sentence executive summary of a metrics review, in "
+            "English, factual and sober. You are given the list of metrics that "
+            "moved materially and the verdict on the one that was investigated. "
+            "Do not invent any figure or any cause; only summarize what is given."
+        )
+        try:
+            return self.complete(system, json.dumps(payload, ensure_ascii=False))
+        except Exception:
+            return template_executive_summary(payload)
+
     # --- use 2: write the conclusion (computes nothing) ---
     def write_report(self, payload: dict) -> str:
         if self.mock:
@@ -234,6 +253,29 @@ def template_report(p: dict) -> str:
     return (f"ABSTAINED — the move in '{metric}' is real but does not localize "
             f"on any tested dimension ({', '.join(p.get('dims_tried', []))}). "
             f"Likely a systemic cause. Action: {p['action_kind']}. {p['action_detail']}")
+
+
+def template_executive_summary(p: dict) -> str:
+    """Deterministic executive summary (mock mode / fallback)."""
+    anomalies = p.get("anomalies", [])
+    verdict = p.get("verdict")
+    metric = p.get("metric", "—")
+    if not anomalies or verdict == "NO_ANOMALY":
+        return "No metric moved materially this period; nothing to investigate."
+    n = len(anomalies)
+    listed = ", ".join("{} {:+.0%}".format(a["metric"],
+                                            a.get("signed_rel", a["delta_rel"]))
+                       for a in anomalies[:3])
+    more = "…" if n > 3 else ""
+    plural = "s" if n > 1 else ""
+    head = (f"{n} metric{plural} moved materially ({listed}{more}). "
+            f"The largest, '{metric}', was investigated: ")
+    if verdict == "ASSERT":
+        cause = p.get("root_cause", "a localized segment")
+        tail = f"the cause is proven and localized to {cause}."
+    else:
+        tail = "no localized cause could be proven, so the agent abstains and escalates."
+    return head + tail
 
 
 def template_speculations(p: dict) -> list[str]:
