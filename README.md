@@ -44,6 +44,22 @@ explicitly labelled as unverified speculation. It never produces a number and
 never decides a verdict, so the verdict is identical with or without it — a
 deterministic mock (`QWEN_MOCK=1`) runs the same pipeline offline.
 
+### Why Qwen
+
+The dimension-ranking step is a Qwen **function call**: the model answers
+through a `rank_dimensions` tool whose JSON schema constrains the output to a
+permutation of the candidate dimensions (`enum` per item), so the plan is
+typed at the protocol level rather than parsed out of prose. That is exactly
+the shape of task the boundary allows the model — a structured suggestion that
+the deterministic math then validates — and it makes the LLM's contribution
+robust instead of a best-effort text parse. The call is on the investigation's
+hot path, so its latency is measured and surfaced in the trace
+(`Qwen (qwen-plus) ranked dimensions in NN ms`); `qwen-plus` on DashScope
+returns the ranking fast enough to keep the loop interactive. Every Qwen call
+falls back to a deterministic path on any error, so the agent never stalls or
+crashes on the model — and `QWEN_MOCK=1` removes it from the loop entirely for
+reproducible demos.
+
 ## Verification gates
 
 `ASSERT` requires all five gates to pass. A failed gate produces an

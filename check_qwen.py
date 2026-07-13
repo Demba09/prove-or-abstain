@@ -29,4 +29,13 @@ reply = client.complete(
     max_tokens=10,
 )
 print(f"Qwen reply: {reply!r}")
-print("\nOK — key and endpoint working.")
+
+print("\ntesting the function-calling path (rank_dimensions)...")
+import time
+dims = ["device", "segment", "region"]
+t0 = time.perf_counter()
+order = client.plan_dimensions("conversion", -0.15, dims)
+print(f"ranked in  : {(time.perf_counter() - t0) * 1000:.0f} ms")
+print(f"order      : {order}")
+assert sorted(order) == sorted(dims), "function call must return a permutation"
+print("\nOK — key, endpoint and function-calling all working.")

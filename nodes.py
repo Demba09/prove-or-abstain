@@ -17,6 +17,8 @@ labelled speculation — it never computes and never decides a verdict.
 """
 from __future__ import annotations
 
+import time
+
 from attribution import decompose, decompose_sum
 from metrics import aggregate
 from gates import evaluate_gates, MATERIAL_REL
@@ -88,8 +90,15 @@ def hypothesizer(state: AgentState) -> dict:
 
     if not state.get("dims_planned"):
         a = state["anomalies"][0]
-        ordered = get_client().plan_dimensions(state["target_metric"], a.delta_rel, queue)
-        if ordered != queue:
+        client = get_client()
+        t0 = time.perf_counter()
+        ordered = client.plan_dimensions(state["target_metric"], a.delta_rel, queue)
+        elapsed_ms = (time.perf_counter() - t0) * 1000
+        if not client.mock:
+            trace = trace + [
+                f"hypothesizer: Qwen ({client.model}) ranked dimensions in "
+                f"{elapsed_ms:.0f} ms -> {ordered}"]
+        elif ordered != queue:
             trace = trace + [f"hypothesizer: LLM dimension plan -> {ordered}"]
         queue = ordered
         updates["dims_planned"] = True

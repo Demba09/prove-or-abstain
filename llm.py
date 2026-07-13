@@ -3,9 +3,11 @@ llm.py — Qwen/DashScope client for Probatio.
 
 Strict boundary (this is the project's thesis): the LLM computes nothing and
 decides no verdict. It does exactly three things:
-  - plan_dimensions() : PROPOSE an exploration order for the dimensions.
-    The math tests every dimension anyway, so the order never changes the
-    final verdict — only how fast it is found.
+  - plan_dimensions() : PROPOSE an exploration order for the dimensions,
+    through a Qwen function call (`rank_dimensions`) whose schema constrains
+    the answer to a permutation of the given dimensions. The math tests every
+    dimension anyway, so the order never changes the final verdict — only how
+    fast it is found.
   - write_report()    : PHRASE a conclusion from ALREADY COMPUTED numbers.
     It is explicitly forbidden from inventing a figure or a cause.
   - speculate_causes(): offer business hypotheses about the WHY, clearly
@@ -59,6 +61,29 @@ class QwenClient:
         )
         return (resp.choices[0].message.content or "").strip()
 
+    # --- low level: a tool/function call that forces a typed answer ---
+    def complete_tool(self, system: str, user: str, tool: dict,
+                      temperature: float = 0.2, max_tokens: int = 200) -> dict:
+        """One chat call constrained to emit a single tool call, returning the
+        parsed arguments dict. Qwen (DashScope compatible-mode) speaks the
+        OpenAI tools protocol, so the model answers through a schema instead of
+        free-form prose — no fence-stripping, no ad-hoc JSON parsing."""
+        if self.mock:
+            raise RuntimeError("complete_tool() called in mock mode")
+        if self._client is None:
+            from openai import OpenAI
+            self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        resp = self._client.chat.completions.create(
+            model=self.model, temperature=temperature, max_tokens=max_tokens,
+            messages=[{"role": "system", "content": system},
+                      {"role": "user", "content": user}],
+            tools=[tool],
+            tool_choice={"type": "function",
+                         "function": {"name": tool["function"]["name"]}},
+        )
+        call = resp.choices[0].message.tool_calls[0]
+        return json.loads(call.function.arguments)
+
     # --- use 1: propose an exploration order (decides nothing) ---
     def plan_dimensions(self, metric: str, delta_rel: float, dims: list[str]) -> list[str]:
         if self.mock:
@@ -66,19 +91,41 @@ class QwenClient:
         system = (
             "You are planning a causal investigation on a business metric. "
             "You are given an anomalous metric and a list of analysis dimensions. "
-            "Return ONLY a JSON array of the same dimensions, reordered from the "
+            "Call `rank_dimensions` with the SAME dimensions reordered from the "
             "most likely to localize the cause to the least likely. "
             "Do not invent any dimension, do not drop any, do not compute anything."
         )
         user = json.dumps({"metric": metric, "delta_rel": round(delta_rel, 4),
                            "dimensions": list(dims)}, ensure_ascii=False)
+        tool = {
+            "type": "function",
+            "function": {
+                "name": "rank_dimensions",
+                "description": "Return the dimensions in exploration order.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "order": {
+                            "type": "array",
+                            "items": {"type": "string", "enum": list(dims)},
+                            "description": "the dimensions, most to least likely",
+                        }
+                    },
+                    "required": ["order"],
+                },
+            },
+        }
+        # 1) structured function call; 2) free-text JSON; 3) original order.
         try:
-            order = json.loads(_strip_fences(self.complete(system, user, max_tokens=120)))
-            order = [d for d in order if d in dims]          # guard: subset only
-            order += [d for d in dims if d not in order]     # re-add anything dropped
-            return order or list(dims)
+            order = self.complete_tool(system, user, tool, max_tokens=120)["order"]
         except Exception:
-            return list(dims)                                # fallback: original order
+            try:
+                order = json.loads(_strip_fences(self.complete(system, user, max_tokens=120)))
+            except Exception:
+                return list(dims)
+        order = [d for d in order if d in dims]          # guard: subset only
+        order += [d for d in dims if d not in order]     # re-add anything dropped
+        return order or list(dims)
 
     # --- use 3: speculate about the business WHY (labelled, never mixed
     # with the proven verdict; computes nothing, decides nothing) ---
