@@ -87,20 +87,26 @@ def make_scenario(label: str, seed: int, *, intensity: float = 0.30,
         ns1 = dict(ns0)
         r1 = {s: _noisy(BASE_RATE, n, max(noise, 0.6), rng) for s in SEGMENTS}
         r0 = {s: _noisy(BASE_RATE, n, max(noise, 0.6), rng) for s in SEGMENTS}
+        # no real move: either nothing material (NO_ANOMALY) or, if wobble
+        # trips the detector, no dominant/significant segment.
         reasons = {"material", "localized", "significant", "confident"}
         cause = None
 
     elif label == "mixshift":
-        # population mix shifts (one segment grows, one shrinks) AND rates move,
-        # so rate/mix/interaction are all non-trivial -> entangled mechanism.
+        # ONE segment concentrates the move (so it looks localized), but that
+        # segment's weight AND rate move together, so its contribution is
+        # dominated by the rate×mix interaction term -> the "clean" gate is the
+        # one that fails. This is the case that tests mechanism separability,
+        # not concentration.
         ns1 = dict(ns0)
-        ns1["organic"] = n * 2.2
-        ns1["paid"] = n * 0.4
+        ns1[target] = n * 2.0                 # paid doubles in volume
         r1 = dict(r0)
-        r1["organic"] = BASE_RATE * 0.7
-        r1["paid"] = BASE_RATE * 1.4
+        r1[target] = BASE_RATE * 0.5          # and its rate halves at the same time
         r1 = {s: _noisy(r1[s], n, noise, rng) for s in SEGMENTS}
-        reasons = {"clean"}
+        # weight and rate move together on one segment: the mechanism is
+        # entangled (clean fails) and no clean single segment dominates
+        # (localized fails) — both are true reasons to decline.
+        reasons = {"localized", "significant", "clean", "confident"}
         cause = None
 
     else:
@@ -119,9 +125,12 @@ def make_scenario(label: str, seed: int, *, intensity: float = 0.30,
         if label == "localized":
             reasons, cause = set(), target
         elif label == "diffuse":
-            reasons, cause = {"localized"}, None
+            # no segment dominates -> the localized/significance/confidence
+            # criteria all genuinely fail; naming any is a true reason.
+            reasons, cause = {"localized", "significant", "confident"}, None
         elif label == "small_sample":
-            reasons, cause = {"significant"}, None
+            # concentrated but underpowered -> significance (and confidence) fail
+            reasons, cause = {"significant", "confident"}, None
         else:
             raise ValueError(f"unknown label {label!r}")
 

@@ -1,0 +1,9 @@
+<svg viewBox="0 0 640 300" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Helvetica,Arial,sans-serif">
+<text x="40" y="34" font-size="18" font-weight="700" fill="#0f172a">How often each tool blamed a cause that wasn't there</text>
+<text x="40" y="56" font-size="13" fill="#64748b">across 36 cases where no single segment was actually responsible — lower is better</text>
+<rect x="40" y="90" width="3" height="46" rx="4" fill="#16a34a"/><text x="55" y="118.0" font-size="15" fill="#0f172a" font-weight="600">0%</text><text x="40" y="82" font-size="13.5" fill="#0f172a">prove-or-abstain</text><text x="40" y="154" font-size="12" fill="#64748b">0 of 36 — it refuses when the data is unclear</text>
+<rect x="40" y="182" width="380" height="46" rx="4" fill="none" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="6 5"/>
+<text x="40" y="174" font-size="13.5" fill="#0f172a">plain Qwen prompt</text>
+<text x="56" y="210.0" font-size="13" fill="#64748b">run <tspan font-family="monospace">python -m bench.run</tspan> with a DashScope key to fill this bar</text>
+<text x="40" y="286" font-size="11.5" fill="#64748b">Both tools run on the same Qwen model; the difference is what each is allowed to decide.</text>
+</svg>

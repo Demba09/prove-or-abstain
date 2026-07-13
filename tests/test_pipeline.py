@@ -74,6 +74,20 @@ def test_scenario_ground_truth_matches_agent():
     assert invented == 0, f"agent invented a cause on {invented} no-cause scenarios"
 
 
+def test_benchmark_our_agent_numbers():
+    # The benchmark headline, enforced: on the 45-scenario suite our agent
+    # invents 0 causes, catches every real one, and every claim is correct.
+    from scenarios import generate_suite
+    from bench.agents import our_agent
+    from bench.metrics import compute_metrics
+    pairs = [(sc, our_agent(sc)) for sc in generate_suite(0)]
+    m = compute_metrics(pairs)
+    assert m["cause_invention_rate"] == 0.0
+    assert m["recall"] == 1.0
+    assert m["precision"] == 1.0
+    assert m["abstention_reason_accuracy"] == 1.0
+
+
 def test_decompose_matches_oracle():
     cols = ["rate", "mix", "interaction", "contribution"]
     for curr in SCENARIOS.values():

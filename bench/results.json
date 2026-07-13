@@ -1,0 +1,454 @@
+{
+  "prove_or_abstain": [
+    {
+      "scenario": "localized-0",
+      "label": "localized",
+      "cause": "paid",
+      "verdict": {
+        "found": true,
+        "segment": "paid",
+        "reason_gate": null
+      }
+    },
+    {
+      "scenario": "diffuse-0",
+      "label": "diffuse",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "mixshift-0",
+      "label": "mixshift",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "noise-0",
+      "label": "noise",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "material"
+      }
+    },
+    {
+      "scenario": "small_sample-0",
+      "label": "small_sample",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "significant"
+      }
+    },
+    {
+      "scenario": "localized-1",
+      "label": "localized",
+      "cause": "paid",
+      "verdict": {
+        "found": true,
+        "segment": "paid",
+        "reason_gate": null
+      }
+    },
+    {
+      "scenario": "diffuse-1",
+      "label": "diffuse",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "mixshift-1",
+      "label": "mixshift",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "noise-1",
+      "label": "noise",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "material"
+      }
+    },
+    {
+      "scenario": "small_sample-1",
+      "label": "small_sample",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "significant"
+      }
+    },
+    {
+      "scenario": "localized-2",
+      "label": "localized",
+      "cause": "paid",
+      "verdict": {
+        "found": true,
+        "segment": "paid",
+        "reason_gate": null
+      }
+    },
+    {
+      "scenario": "diffuse-2",
+      "label": "diffuse",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "mixshift-2",
+      "label": "mixshift",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "noise-2",
+      "label": "noise",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "small_sample-2",
+      "label": "small_sample",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "significant"
+      }
+    },
+    {
+      "scenario": "localized-3",
+      "label": "localized",
+      "cause": "paid",
+      "verdict": {
+        "found": true,
+        "segment": "paid",
+        "reason_gate": null
+      }
+    },
+    {
+      "scenario": "diffuse-3",
+      "label": "diffuse",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "mixshift-3",
+      "label": "mixshift",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "noise-3",
+      "label": "noise",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "material"
+      }
+    },
+    {
+      "scenario": "small_sample-3",
+      "label": "small_sample",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "significant"
+      }
+    },
+    {
+      "scenario": "localized-4",
+      "label": "localized",
+      "cause": "paid",
+      "verdict": {
+        "found": true,
+        "segment": "paid",
+        "reason_gate": null
+      }
+    },
+    {
+      "scenario": "diffuse-4",
+      "label": "diffuse",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "mixshift-4",
+      "label": "mixshift",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "noise-4",
+      "label": "noise",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "material"
+      }
+    },
+    {
+      "scenario": "small_sample-4",
+      "label": "small_sample",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "significant"
+      }
+    },
+    {
+      "scenario": "localized-5",
+      "label": "localized",
+      "cause": "paid",
+      "verdict": {
+        "found": true,
+        "segment": "paid",
+        "reason_gate": null
+      }
+    },
+    {
+      "scenario": "diffuse-5",
+      "label": "diffuse",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "mixshift-5",
+      "label": "mixshift",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "noise-5",
+      "label": "noise",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "material"
+      }
+    },
+    {
+      "scenario": "small_sample-5",
+      "label": "small_sample",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "significant"
+      }
+    },
+    {
+      "scenario": "localized-6",
+      "label": "localized",
+      "cause": "paid",
+      "verdict": {
+        "found": true,
+        "segment": "paid",
+        "reason_gate": null
+      }
+    },
+    {
+      "scenario": "diffuse-6",
+      "label": "diffuse",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "mixshift-6",
+      "label": "mixshift",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "noise-6",
+      "label": "noise",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "significant"
+      }
+    },
+    {
+      "scenario": "small_sample-6",
+      "label": "small_sample",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "significant"
+      }
+    },
+    {
+      "scenario": "localized-7",
+      "label": "localized",
+      "cause": "paid",
+      "verdict": {
+        "found": true,
+        "segment": "paid",
+        "reason_gate": null
+      }
+    },
+    {
+      "scenario": "diffuse-7",
+      "label": "diffuse",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "mixshift-7",
+      "label": "mixshift",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "noise-7",
+      "label": "noise",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "material"
+      }
+    },
+    {
+      "scenario": "small_sample-7",
+      "label": "small_sample",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "significant"
+      }
+    },
+    {
+      "scenario": "localized-8",
+      "label": "localized",
+      "cause": "paid",
+      "verdict": {
+        "found": true,
+        "segment": "paid",
+        "reason_gate": null
+      }
+    },
+    {
+      "scenario": "diffuse-8",
+      "label": "diffuse",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "mixshift-8",
+      "label": "mixshift",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "noise-8",
+      "label": "noise",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "localized"
+      }
+    },
+    {
+      "scenario": "small_sample-8",
+      "label": "small_sample",
+      "cause": null,
+      "verdict": {
+        "found": false,
+        "segment": null,
+        "reason_gate": "significant"
+      }
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "prove_or_abstain": {
+    "n_scenarios": 45,
+    "n_no_cause": 36,
+    "n_localized": 9,
+    "cause_invention_rate": 0.0,
+    "invented_count": 0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "abstention_reason_accuracy": 1.0
+  }
+}

@@ -70,6 +70,40 @@ The same agent on the `diffuse` panel — every segment down by the same amount
 — reaches step 4, finds nothing concentrated, and **ABSTAINs** with a named
 reason instead of inventing a culprit. That contrast is the whole product.
 
+## The benchmark
+
+We built 45 test cases with a known answer: 9 where one segment really is the
+cause, and 36 where there is no single cause (the drop is spread out, entangled
+with a population shift, pure noise, or too small to trust). Then we scored
+this tool on all 45.
+
+![benchmark](docs/benchmark.svg)
+
+| | prove-or-abstain |
+|---|---|
+| **Blamed a cause that wasn't there** (36 no-cause cases) | **0%** |
+| Found the real cause when there was one (9 cases) | **100%** |
+| Right every time it did claim a cause | **100%** |
+| Named a real reason when it declined | **100%** |
+
+The headline is the first row: **zero invented causes.** The tool finds every
+real cause and never manufactures a fake one — and whenever it declines, it
+points at a specific reason the data failed (too spread out, not significant,
+mechanism entangled), never a shrug.
+
+The comparison that matters is against a plain-prompt assistant on the *same*
+Qwen model — handed the same numbers and asked, honestly, to find the cause or
+say there isn't one. That column fills in when the benchmark runs with a
+DashScope key:
+
+```bash
+python -m bench.run          # our column now; both columns with a key set
+python -m bench.figure       # regenerate docs/benchmark.svg
+```
+
+The point isn't that Qwen is weak — it's that the discipline lives in the
+scaffolding around the model, not the model itself. See [`bench/`](bench/).
+
 ---
 
 ## How it works (for the technically curious)
