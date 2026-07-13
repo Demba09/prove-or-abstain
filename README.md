@@ -2,29 +2,50 @@
 
 ![CI](https://github.com/Demba09/prove-or-abstain/actions/workflows/ci.yml/badge.svg)
 
-A causal investigation agent for product metrics. Given a baseline period and
-a current period, it determines whether a metric moved materially, tests which
-segment explains the move, and returns one of two verdicts:
+**A number dropped. Before anyone acts, one question: is one thing broken, or
+is everything just a little soft?** `prove-or-abstain` answers it — and,
+unlike every other "AI for analytics" tool, it refuses to answer when the data
+can't actually support one.
 
-- **ASSERT** — the cause is localized and quantified, and the conclusion
-  passes every verification gate. The agent recommends a scoped action, or
-  executes it directly when autopilot is enabled and confidence is high.
-- **ABSTAIN** — the evidence does not single out a cause. The agent escalates
-  to a human and states which gate failed and why.
+> 🎚️ **Try the live slider** (`/explore` on the running service): drag from
+> "the drop is everywhere" to "from one channel" and watch the tool switch
+> between **"not sure yet"** and **"we found it"** at a clean, reproducible
+> point.
 
-The second verdict is the point of the design. An agent that is allowed to
-act on data needs a principled way to refuse to act when the data does not
-support a conclusion — otherwise it will always produce a plausible-sounding
-diagnosis, right or wrong.
+### The problem
 
-![architecture](docs/architecture.svg)
+You run an online store. This weekend, orders dropped. Point any AI assistant
+at it and it will confidently name a culprit — a channel, a device, a region —
+whether or not the data points to one. Act on a wrong-but-confident answer and
+you've sent the team chasing a ghost, or worse, "fixed" something that wasn't
+broken. A tool you let act on your data needs the opposite instinct: the
+discipline to say **"not sure yet"** instead of guessing.
+
+### What it does
+
+Point it at two periods — last week vs this week — and it returns one of two
+answers, never a fabricated third:
+
+- ✅ **We found it.** One channel (or device, or region) clearly carries the
+  drop. The tool names it, quantifies it, and proposes a scoped fix — or, on
+  autopilot, acts on it.
+- 🤔 **Not sure yet.** The drop is spread out, or too small to trust. The tool
+  says so, names *why* it can't conclude, and hands off to a human instead of
+  inventing a cause.
+
+The second answer is the whole point. On **45 test cases where there was no
+single real cause, this tool invented one 0 times** — because the verdict is
+decided by arithmetic, not by how confident the model sounds. This tool and a
+plain-prompt assistant run on the *same* Qwen model; the difference is not the
+model, it's what we let it decide. (The head-to-head against that plain-prompt
+baseline is the benchmark below.)
 
 ## An example investigation
 
-Monday morning, an e-commerce dashboard shows checkout conversion down from
-7% to 5% over the weekend — a 29% relative drop, well past the point of
-"noise". The on-call analyst has to answer one question before touching
-anything: *is this one broken thing, or is the whole funnel just soft?*
+Monday morning, an online store's dashboard shows checkout conversion down
+from 7% to 5% over the weekend — a 29% drop, far past the point of "noise".
+Someone has to answer one question before touching anything: *is this one
+broken thing, or is the whole funnel just soft?*
 
 Point `prove-or-abstain` at the two periods (the `clean` panel) and it runs
 that reasoning explicitly:
@@ -49,7 +70,14 @@ The same agent on the `diffuse` panel — every segment down by the same amount
 — reaches step 4, finds nothing concentrated, and **ABSTAINs** with a named
 reason instead of inventing a culprit. That contrast is the whole product.
 
-## How it works
+---
+
+## How it works (for the technically curious)
+
+Two words map to everything below: **"we found it" is `ASSERT`**, **"not sure
+yet" is `ABSTAIN`** — the verdicts the API actually returns.
+
+![architecture](docs/architecture.svg)
 
 The agent is a LangGraph state machine with seven nodes and one conditional
 loop. When a dimension fails to localize the cause, the verifier routes back
