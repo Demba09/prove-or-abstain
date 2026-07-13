@@ -19,6 +19,36 @@ diagnosis, right or wrong.
 
 ![architecture](docs/architecture.svg)
 
+## An example investigation
+
+Monday morning, an e-commerce dashboard shows checkout conversion down from
+7% to 5% over the weekend — a 29% relative drop, well past the point of
+"noise". The on-call analyst has to answer one question before touching
+anything: *is this one broken thing, or is the whole funnel just soft?*
+
+Point `prove-or-abstain` at the two periods (the `clean` panel) and it runs
+that reasoning explicitly:
+
+1. **detector** confirms the move is material (29% ≫ 2%) and worth explaining.
+2. **hypothesizer** asks Qwen which dimension to try first; it suggests
+   `device`.
+3. **investigator + verifier** decompose along `device` — and *abstain*:
+   the drop is spread ~50/50 across mobile and desktop, so no device
+   localizes it. A weaker agent would stop here and blame "mobile, probably".
+4. The loop tries the next dimension, `segment`, and this time every gate
+   passes: **the entire move concentrates on the `paid` segment**
+   (concentration 1.00), the z-test is decisive (p ≈ 4e-6), rate and mix are
+   cleanly separable.
+5. **ASSERT** — root cause `segment=paid`, confidence 0.79. The paid-traffic
+   funnel broke; organic, referral and email are fine.
+6. Only now does Qwen add labelled speculation about the *why* — a campaign
+   change? a landing-page regression on the paid ads? — for a human to check.
+   The proven part (`segment=paid`) and the guesswork stay strictly apart.
+
+The same agent on the `diffuse` panel — every segment down by the same amount
+— reaches step 4, finds nothing concentrated, and **ABSTAINs** with a named
+reason instead of inventing a culprit. That contrast is the whole product.
+
 ## How it works
 
 The agent is a LangGraph state machine with seven nodes and one conditional

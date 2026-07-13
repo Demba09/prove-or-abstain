@@ -45,7 +45,9 @@ speculations change.
 
 **Narration:**
 
-> "Conversion dropped. The agent's first hypothesis — the device dimension —
+> "It's Monday. Over the weekend, checkout conversion fell from 7% to 5% — is
+> one thing broken, or is the whole funnel soft? The agent's first hypothesis
+> — the device dimension —
 > doesn't localize the cause, so it loops and tries the next one. Segment
 > does localize it: paid alone collapsed from 7 to 5 percent. Look at the
 > gates: the effect is material, concentrated on one segment, statistically
