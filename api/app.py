@@ -172,9 +172,56 @@ def home() -> FileResponse:
     return FileResponse(_STATIC / "index.html")
 
 
+@app.get("/explore")
+def explore() -> FileResponse:
+    """The slider view: watch the verdict flip from diffuse to localized."""
+    return FileResponse(_STATIC / "explore.html")
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/sweep")
+def sweep(points: int = 21) -> dict:
+    """Pre-compute the verdict along the concentration axis: the SAME aggregate
+    move, swept from perfectly diffuse (spread across every segment) to
+    perfectly localized (all in one segment). The server decides every point;
+    the UI slider only reads this array. This is the whole thesis in one
+    control — the verdict flips at a clean, reproducible point."""
+    from scenarios import make_scenario
+    points = max(3, min(int(points), 61))
+    series = []
+    for i in range(points):
+        conc = i / (points - 1)
+        sc = make_scenario("localized", seed=0, intensity=0.30,
+                            concentration=conc, noise=0.0, n=4000, target="paid")
+        final = INVESTIGATION_GRAPH.invoke({
+            "baseline": sc.baseline, "current": sc.current,
+            "metrics": ["conversion"], "metric_kinds": {}, "dims": sc.dims,
+            "autopilot_enabled": False, "trace": []})
+        rep = final.get("winning_report")
+        reports = final.get("reports_by_dim", {})
+        top_share = max((r.concentration for r in reports.values()), default=0.0)
+        # per-segment absolute contribution share, for the growing-bar visual
+        out = final["investigation"]["out"]
+        ca = out["contribution"].abs()
+        tot = float(ca.sum()) or 1.0
+        seg_shares = sorted(
+            ({"segment": s, "share": float(ca.loc[s] / tot)} for s in ca.index),
+            key=lambda d: d["share"], reverse=True)
+        series.append(_jsonable({
+            "concentration": conc,
+            "verdict": final.get("verdict"),
+            "confidence": final.get("confidence") or 0.0,
+            "root_cause": (
+                {"dimension": final.get("winning_dim"), "segment": rep.leading_segment}
+                if rep is not None else None),
+            "top_share": top_share,
+            "segments": seg_shares,
+        }))
+    return {"points": points, "dimension": "segment", "series": series}
 
 
 @app.post("/investigate")

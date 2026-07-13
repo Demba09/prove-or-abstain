@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>prove-or-abstain — du diffus au localisé</title>
+<style>
+  :root {
+    --bg:#f5f6f9; --card:#fff; --ink:#0f172a; --muted:#5b6472; --line:#e2e8f0;
+    --indigo:#4f46e5; --bar:#c7cdfa; --bar-hi:#4f46e5;
+    --green:#16a34a; --green-bg:#f0fdf4; --red:#dc2626; --red-bg:#fef2f2; --axis:#cbd5e1;
+  }
+  @media (prefers-color-scheme:dark){:root{
+    --bg:#0b1120; --card:#131a2a; --ink:#e7ecf3; --muted:#93a0b4; --line:#26304a;
+    --indigo:#818cf8; --bar:#2b3566; --bar-hi:#818cf8;
+    --green:#4ade80; --green-bg:#0f2417; --red:#f87171; --red-bg:#2a1416; --axis:#3a4560; }}
+  :root[data-theme="dark"]{
+    --bg:#0b1120; --card:#131a2a; --ink:#e7ecf3; --muted:#93a0b4; --line:#26304a;
+    --indigo:#818cf8; --bar:#2b3566; --bar-hi:#818cf8;
+    --green:#4ade80; --green-bg:#0f2417; --red:#f87171; --red-bg:#2a1416; --axis:#3a4560; }
+  :root[data-theme="light"]{
+    --bg:#f5f6f9; --card:#fff; --ink:#0f172a; --muted:#5b6472; --line:#e2e8f0;
+    --indigo:#4f46e5; --bar:#c7cdfa; --bar-hi:#4f46e5;
+    --green:#16a34a; --green-bg:#f0fdf4; --red:#dc2626; --red-bg:#fef2f2; --axis:#cbd5e1; }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:15px/1.55 -apple-system,"Segoe UI",Helvetica,Arial,sans-serif;font-variant-numeric:tabular-nums;}
+  main{max-width:760px;margin:0 auto;padding:32px 20px 64px;}
+  h1{font-size:24px;margin:0 0 4px;letter-spacing:-.01em;}
+  .sub{color:var(--muted);margin:0 0 24px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:24px;}
+  .verdict-row{display:flex;align-items:center;gap:16px;flex-wrap:wrap;min-height:56px;}
+  .badge{font-size:22px;font-weight:700;padding:8px 20px;border-radius:9px;transition:background .15s,color .15s,border-color .15s;}
+  .badge.assert{color:var(--green);background:var(--green-bg);border:1.5px solid var(--green);}
+  .badge.abstain{color:var(--red);background:var(--red-bg);border:1.5px solid var(--red);}
+  .cause{color:var(--muted);}.cause b{color:var(--ink);}
+  .caption{margin:16px 0 4px;min-height:2.8em;}
+  .caption b{color:var(--indigo);}
+  .bars{margin:18px 0 6px;display:flex;flex-direction:column;gap:9px;}
+  .bar-row{display:grid;grid-template-columns:80px 1fr 52px;align-items:center;gap:10px;font-size:13px;}
+  .bar-track{display:block;background:var(--bg);border:1px solid var(--line);border-radius:5px;height:20px;overflow:hidden;}
+  .bar-fill{display:block;height:100%;background:var(--bar);border-radius:5px 0 0 5px;transition:width .12s ease,background .15s;}
+  .bar-fill.dom{background:var(--bar-hi);}
+  .bar-val{color:var(--muted);text-align:right;}
+  .slider-wrap{margin:22px 0 8px;}
+  input[type=range]{width:100%;accent-color:var(--indigo);}
+  .scale{display:flex;justify-content:space-between;color:var(--muted);font-size:12.5px;margin-top:2px;}
+  .flip-note{font-size:12.5px;color:var(--muted);margin-top:10px;}
+  .flip-note b{color:var(--ink);}
+  a{color:var(--indigo);}
+  footer{color:var(--muted);font-size:13px;margin-top:24px;}
+</style>
+</head>
+<body>
+<main>
+  <h1>Une seule cause, ou juste du bruit&nbsp;?</h1>
+  <p class="sub">Glissez le curseur&nbsp;: la même baisse de conversion, d'abord répartie sur tous les segments, puis concentrée sur un seul. Regardez le verdict basculer — à un point net, pas progressivement.</p>
+
+  <div class="card">
+    <div class="verdict-row">
+      <span class="badge" id="badge"></span>
+      <span class="cause" id="cause"></span>
+    </div>
+    <p class="caption" id="caption"></p>
+
+    <div class="bars" id="bars"></div>
+
+    <div class="slider-wrap">
+      <input type="range" id="slider" min="0" max="20" value="0" step="1" aria-label="concentration">
+      <div class="scale"><span>réparti sur tous les segments</span><span>concentré sur un seul</span></div>
+    </div>
+    <p class="flip-note" id="flipnote"></p>
+  </div>
+
+  <footer>Chaque verdict est décidé côté serveur par les mathématiques (pandas/numpy) — le curseur ne fait que lire une série pré-calculée. <a href="/">← démo complète</a></footer>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+let SERIES = [];
+
+const SEG_LABELS = {organic:"organique", paid:"payant", referral:"parrainage", email:"e-mail", social:"réseaux"};
+
+function render(i) {
+  const p = SERIES[i];
+  if (!p) return;
+  const isAssert = p.verdict === "ASSERT";
+  const badge = $('badge');
+  badge.textContent = isAssert ? "CAUSE PROUVÉE" : "S'ABSTIENT";
+  badge.className = "badge " + (isAssert ? "assert" : "abstain");
+  $('cause').innerHTML = isAssert && p.root_cause
+    ? `cause&nbsp;: <b>${SEG_LABELS[p.root_cause.segment] || p.root_cause.segment}</b> · confiance ${p.confidence.toFixed(2)}`
+    : `aucune cause localisée · segment dominant à ${(p.top_share*100).toFixed(0)}%`;
+
+  $('caption').innerHTML = isAssert
+    ? `Un segment concentre <b>${(p.top_share*100).toFixed(0)}%</b> du mouvement — assez pour que l'agent affirme une cause et propose une action ciblée.`
+    : `La baisse est étalée (segment dominant&nbsp;: ${(p.top_share*100).toFixed(0)}%). Aucun segment ne se détache&nbsp;: l'agent refuse d'inventer un coupable.`;
+
+  const bars = $('bars');
+  bars.innerHTML = '';
+  const max = Math.max(...p.segments.map(s => s.share), 1e-9);
+  p.segments.forEach((s, idx) => {
+    const row = document.createElement('div'); row.className = 'bar-row';
+    const dom = idx === 0 && isAssert;
+    row.innerHTML =
+      `<span>${SEG_LABELS[s.segment] || s.segment}</span>
+       <span class="bar-track"><span class="bar-fill${dom?' dom':''}" style="width:${(s.share/max*100).toFixed(1)}%"></span></span>
+       <span class="bar-val">${(s.share*100).toFixed(0)}%</span>`;
+    bars.appendChild(row);
+  });
+}
+
+function findFlip() {
+  for (let i = 1; i < SERIES.length; i++)
+    if (SERIES[i-1].verdict !== SERIES[i].verdict) return i;
+  return -1;
+}
+
+fetch('/sweep?points=21').then(r => r.json()).then(b => {
+  SERIES = b.series;
+  const sl = $('slider');
+  sl.max = SERIES.length - 1;
+  sl.addEventListener('input', () => render(+sl.value));
+  const flip = findFlip();
+  if (flip > 0) {
+    const c = SERIES[flip].top_share;
+    $('flipnote').innerHTML = `<b>Bascule</b> quand le segment dominant dépasse ~${(c*100).toFixed(0)}% du mouvement. En-dessous, l'agent s'abstient ; au-dessus, il prouve. Ce seuil est net et reproductible — il ne dépend pas du hasard.`;
+  }
+  render(0);
+}).catch(e => { $('caption').textContent = 'Impossible de charger la série : ' + e.message; });
+</script>
+</body>
+</html>
