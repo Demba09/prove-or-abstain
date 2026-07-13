@@ -44,16 +44,51 @@
   .meta { color: var(--muted); }
   .meta b { color: var(--ink); }
 
-  .gates { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 14px 0; }
+  /* --- graph strip --- */
+  .graph { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin: 4px 0 20px; }
+  .gnode {
+    font-size: 12px; padding: 5px 10px; border-radius: 6px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--muted); white-space: nowrap;
+    opacity: .45; transition: none;
+  }
+  .gnode.fired { opacity: 1; color: var(--ink); border-color: var(--indigo); background: #eef2ff; }
+  .gnode.fired.win { border-color: var(--green); background: var(--green-bg); color: var(--green); font-weight: 600; }
+  .gnode.reveal { animation: pop .28s ease both; }
+  .garrow { color: var(--line); font-size: 13px; padding: 0 1px; }
+  .garrow.on { color: var(--indigo); }
+  .gloop { font-size: 11.5px; color: var(--indigo); margin: 0 0 16px; }
+
+  /* --- gate cards + per-gate chips --- */
+  .gates { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin: 14px 0; }
   .gate { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
-  .gate h3 { margin: 0 0 6px; font-size: 14px; display: flex; justify-content: space-between; }
+  .gate h3 { margin: 0 0 8px; font-size: 14px; display: flex; justify-content: space-between; }
   .gate .v { font-weight: 700; }
   .gate.assert { border-color: var(--green); background: var(--green-bg); }
   .gate.assert .v { color: var(--green); }
   .gate.abstain { border-color: var(--red); background: var(--red-bg); }
   .gate.abstain .v { color: var(--red); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 8px; }
+  .chip {
+    font-size: 12px; padding: 3px 9px 3px 7px; border-radius: 999px;
+    border: 1px solid var(--line); background: #fff; display: inline-flex; gap: 5px; align-items: center;
+    opacity: 0; animation: pop .3s ease forwards;
+  }
+  .chip .dot { width: 13px; height: 13px; border-radius: 999px; display: inline-flex; align-items: center; justify-content: center; font-size: 9px; color: #fff; }
+  .chip.pass { border-color: var(--green); color: var(--green); }
+  .chip.pass .dot { background: var(--green); }
+  .chip.fail { border-color: var(--red); color: var(--red); }
+  .chip.fail .dot { background: var(--red); }
   .gate ul { margin: 4px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
   .gate .nums { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+
+  @keyframes pop { from { opacity: 0; transform: translateY(4px) scale(.96); } to { opacity: 1; transform: none; } }
+
+  /* --- waterfall --- */
+  .wf-title { font-size: 13.5px; color: var(--ink); margin: 18px 0 4px; }
+  .wf-title b { color: var(--indigo); }
+  .wf-legend { font-size: 12px; color: var(--muted); margin: 0 0 6px; display: flex; gap: 14px; flex-wrap: wrap; }
+  .wf-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+  .waterfall { width: 100%; overflow-x: auto; }
 
   .action { border-left: 3px solid var(--amber); background: var(--amber-bg); padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 14px 0; }
   .action b { color: var(--amber); }
@@ -100,7 +135,23 @@
       <span class="meta" id="confidence"></span>
       <span class="meta" id="rootcause"></span>
     </div>
+
+    <div class="graph" id="graph"></div>
+    <p class="gloop" id="gloop"></p>
+
     <div class="gates" id="gates"></div>
+
+    <div id="wfwrap" style="display:none">
+      <p class="wf-title" id="wftitle"></p>
+      <p class="wf-legend">
+        <span><i style="background:#4f46e5"></i>rate</span>
+        <span><i style="background:#f59e0b"></i>mix</span>
+        <span><i style="background:#94a3b8"></i>interaction</span>
+        <span class="hint" style="margin:0">bar = net contribution to ΔR</span>
+      </p>
+      <div class="waterfall" id="waterfall"></div>
+    </div>
+
     <p class="drill" id="drill"></p>
     <div class="action" id="action"></div>
     <p class="report" id="report"></p>
@@ -109,16 +160,17 @@
   </div>
 
   <footer>
-    Every number comes from pandas/numpy; the LLM only orders the dimensions to try and phrases the report.
+    Every number comes from pandas/numpy; the LLM (Qwen) only orders the dimensions to try and phrases the report.
     <a href="/docs">API docs</a>
   </footer>
 </main>
 
 <script>
 const $ = id => document.getElementById(id);
+const GATE_ORDER = ["material", "localized", "significant", "clean", "confident"];
+const NODES = ["detector", "hypothesizer", "investigator", "verifier", "driller", "actuator", "reporter"];
 
 function setBusy(b) { document.querySelectorAll('button').forEach(x => x.disabled = b); }
-
 function fail(msg) { $('error').style.display = 'block'; $('error').textContent = msg; }
 
 async function call(url, opts) {
@@ -154,6 +206,124 @@ function runUpload() {
   call('/investigate/upload', {method: 'POST', body: fd});
 }
 
+// which nodes fired, and how many hypothesizer passes (= loop laps), from the trace
+function tracedNodes(trace) {
+  const fired = new Set(), counts = {};
+  for (const line of trace) {
+    const m = /^(\w+):/.exec(line);
+    if (m && NODES.includes(m[1])) { fired.add(m[1]); counts[m[1]] = (counts[m[1]] || 0) + 1; }
+  }
+  return {fired, laps: counts.hypothesizer || 0};
+}
+
+function renderGraph(b) {
+  const g = $('graph');
+  g.innerHTML = '';
+  const {fired, laps} = tracedNodes(b.trace || []);
+  const winDim = b.root_cause ? b.root_cause.dimension : null;
+  NODES.forEach((name, i) => {
+    if (i > 0) {
+      const a = document.createElement('span');
+      a.className = 'garrow' + (fired.has(NODES[i - 1]) && fired.has(name) ? ' on' : '');
+      a.textContent = '→';
+      g.appendChild(a);
+    }
+    const el = document.createElement('span');
+    const isWin = name === 'verifier' && b.verdict === 'ASSERT';
+    el.className = 'gnode' + (fired.has(name) ? ' fired reveal' : '') + (isWin ? ' win' : '');
+    el.style.animationDelay = (i * 90) + 'ms';
+    el.textContent = name;
+    g.appendChild(el);
+  });
+  $('gloop').textContent = laps > 1
+    ? `↺ the verifier routed back to the hypothesizer ${laps - 1} time${laps > 2 ? 's' : ''} — ${laps} dimension${laps > 1 ? 's' : ''} tested before the verdict.`
+    : '';
+}
+
+function chip(name, pass, delay) {
+  const c = document.createElement('span');
+  c.className = 'chip ' + (pass ? 'pass' : 'fail');
+  c.style.animationDelay = delay + 'ms';
+  c.innerHTML = `<span class="dot">${pass ? '✓' : '✕'}</span>${name}`;
+  return c;
+}
+
+function renderGates(b) {
+  const gates = $('gates');
+  gates.innerHTML = '';
+  let card = 0;
+  for (const [dim, g] of Object.entries(b.gates || {})) {
+    const el = document.createElement('div');
+    el.className = 'gate ' + g.verdict.toLowerCase();
+    const pval = g.leading_p != null ? ` · p ${g.leading_p.toExponential(1)}` : '';
+    const chips = document.createElement('div');
+    chips.className = 'chips';
+    const base = card * 260;   // stagger cards, then chips within each
+    GATE_ORDER.forEach((name, i) => {
+      const st = g.checks ? g.checks[name] : undefined;
+      if (st === undefined) return;
+      chips.appendChild(chip(name, st, base + i * 130));
+    });
+    const head = document.createElement('h3');
+    head.innerHTML = `<span>dimension: ${dim}</span><span class="v">${g.verdict}</span>`;
+    el.appendChild(head);
+    el.appendChild(chips);
+    const failed = (g.reasons || []).filter(r => r !== 'all gates pass');
+    if (failed.length) {
+      const ul = document.createElement('ul');
+      ul.innerHTML = failed.map(r => `<li>${r}</li>`).join('');
+      el.appendChild(ul);
+    }
+    const nums = document.createElement('div');
+    nums.className = 'nums';
+    nums.innerHTML = `leader: ${g.leading_segment ?? '—'} · concentration ${g.concentration.toFixed(2)}
+      · interaction ${g.interaction_share.toFixed(2)} · n ${g.leading_sample_n ?? '—'}${pval}`;
+    el.appendChild(nums);
+    gates.appendChild(el);
+    card++;
+  }
+}
+
+// horizontal signed-bar waterfall of per-segment contributions
+function renderWaterfall(b) {
+  const c = b.contributions;
+  const wrap = $('wfwrap');
+  if (!c || !c.segments || !c.segments.length) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  $('wftitle').innerHTML =
+    `Contribution to the move along <b>${c.dimension}</b> — how much each segment accounts for`;
+
+  const segs = c.segments;
+  const maxAbs = Math.max(...segs.map(s => Math.abs(s.contribution)), 1e-9);
+  const W = 640, rowH = 30, padL = 96, padR = 96, midW = W - padL - padR;
+  const mid = padL + midW / 2, scale = (midW / 2) / maxAbs;
+  const valX = W - padR + 8;   // reserved right column for the net value
+  const H = segs.length * rowH + 24;
+  const parts = [
+    ['rate', '#4f46e5'], ['mix', '#f59e0b'], ['interaction', '#94a3b8'],
+  ];
+  let svg = `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" font-family="inherit">`;
+  svg += `<line x1="${mid}" y1="4" x2="${mid}" y2="${H - 16}" stroke="#cbd5e1" stroke-width="1"/>`;
+  segs.forEach((s, i) => {
+    const y = 8 + i * rowH;
+    // stacked signed segments (rate|mix|interaction), each from the running offset
+    let posOff = mid, negOff = mid;
+    parts.forEach(([k, col]) => {
+      const v = s[k] || 0;
+      if (Math.abs(v) < 1e-12) return;
+      const w = Math.abs(v) * scale;
+      const x = v >= 0 ? posOff : negOff - w;
+      svg += `<rect x="${x.toFixed(1)}" y="${y}" width="${w.toFixed(1)}" height="${rowH - 12}" fill="${col}" opacity="0.9"><title>${k}: ${v.toFixed(4)}</title></rect>`;
+      if (v >= 0) posOff += w; else negOff -= w;
+    });
+    svg += `<text x="${padL - 8}" y="${y + 13}" text-anchor="end" font-size="12.5" fill="#0f172a">${s.segment}</text>`;
+    const net = s.contribution;
+    svg += `<text x="${valX}" y="${y + 13}" text-anchor="start" font-size="11.5" fill="#64748b">${net >= 0 ? '+' : ''}${net.toFixed(4)}</text>`;
+  });
+  svg += `</svg>`;
+  $('waterfall').innerHTML = svg;
+}
+
 function render(b) {
   $('result').style.display = 'block';
 
@@ -165,19 +335,9 @@ function render(b) {
     ? `root cause <b>${b.root_cause.dimension} = ${b.root_cause.segment}</b>`
     : (v === 'ABSTAIN' ? 'no localized cause' : '');
 
-  const gates = $('gates');
-  gates.innerHTML = '';
-  for (const [dim, g] of Object.entries(b.gates || {})) {
-    const el = document.createElement('div');
-    el.className = 'gate ' + g.verdict.toLowerCase();
-    const pval = g.leading_p != null ? ` · p ${g.leading_p.toExponential(1)}` : '';
-    el.innerHTML =
-      `<h3><span>dimension: ${dim}</span><span class="v">${g.verdict}</span></h3>
-       <ul>${g.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
-       <div class="nums">leader: ${g.leading_segment ?? '—'} · concentration ${g.concentration.toFixed(2)}
-         · interaction ${g.interaction_share.toFixed(2)} · n ${g.leading_sample_n ?? '—'}${pval}</div>`;
-    gates.appendChild(el);
-  }
+  renderGraph(b);
+  renderGates(b);
+  renderWaterfall(b);
 
   const d = b.drilldown;
   $('drill').style.display = d ? 'block' : 'none';

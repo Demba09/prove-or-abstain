@@ -54,6 +54,7 @@ class GateReport:
     delta_R_relative: float
     reasons: list = field(default_factory=list)    # why this verdict
     subscores: dict = field(default_factory=dict)  # confidence components
+    checks: dict = field(default_factory=dict)     # per-gate pass/fail booleans
 
 
 def _ramp(x, lo, hi):
@@ -174,4 +175,7 @@ def evaluate_gates(agg: dict, out: pd.DataFrame, baseline_n: pd.Series | None = 
         delta_R_relative=float(delta_rel),
         reasons=reasons or ["all gates pass"],
         subscores={"f_concentration": f_conc, "f_significance": f_signif, "f_clean": f_clean},
+        checks={"material": bool(g_material), "localized": bool(g_localized),
+                "significant": bool(g_signif), "clean": bool(g_clean),
+                "confident": bool(g_confident)},
     )

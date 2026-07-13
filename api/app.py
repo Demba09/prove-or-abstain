@@ -84,6 +84,30 @@ def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
 
     win = final.get("winning_report")
     drill = final.get("drilldown")
+
+    # per-segment contribution breakdown of the dimension that was decomposed
+    # (the winning one on ASSERT, the last tried on ABSTAIN) — feeds the
+    # waterfall chart on the demo page. Numbers only, straight from decompose().
+    contributions = None
+    inv = final.get("investigation")
+    if inv is not None:
+        out = inv["out"]
+        ordered = out.reindex(out["contribution"].abs().sort_values(ascending=False).index)
+        contributions = {
+            "dimension": final.get("current_dim"),
+            "kind": inv.get("kind", "rate"),
+            "total": float(final["anomalies"][0].R1 - final["anomalies"][0].R0)
+                     if final.get("anomalies") else None,
+            "segments": [
+                {"segment": idx,
+                 "rate": float(row["rate"]),
+                 "mix": float(row["mix"]),
+                 "interaction": float(row["interaction"]),
+                 "contribution": float(row["contribution"])}
+                for idx, row in ordered.iterrows()
+            ],
+        }
+
     return _jsonable({
         "verdict": final.get("verdict"),
         "confidence": final.get("confidence"),
@@ -101,6 +125,7 @@ def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
             else None
         ),
         "action": asdict(final["actions"][0]) if final.get("actions") else None,
+        "contributions": contributions,
         "report": final.get("report"),
         "speculations": final.get("speculations", []),
         "trace": final.get("trace", []),
