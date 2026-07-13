@@ -67,6 +67,56 @@ def _jsonable(v):
     return v
 
 
+_WHY_ABSTAIN = {
+    "material": "The move is too small to be worth explaining.",
+    "localized": "No single segment stands out — the drop is spread across all of them.",
+    "significant": "The leading segment's move is within normal sampling noise.",
+    "clean": "Rate and population-mix effects are tangled together, so no clean single cause.",
+    "confident": "The signal is too weak to act on with confidence.",
+}
+_GATE_SEQ = ["material", "localized", "significant", "clean", "confident"]
+
+
+def _analyst_note(final: dict) -> dict:
+    """A plain-language read of the result: a one-sentence conclusion, a few
+    'here's why' points, and 'here's what to do'. Built from figures already
+    computed — the technical JSON stays available, this is the human layer."""
+    metric = final.get("target_metric") or "the metric"
+    verdict = final.get("verdict")
+    win = final.get("winning_report")
+
+    if verdict == "NO_ANOMALY":
+        return {"headline": f"No real change in {metric} this period.",
+                "why": ["The movement is within normal noise — nothing material to explain."],
+                "recommendation": "Nothing to do."}
+
+    if win is not None:
+        dim, seg = final.get("winning_dim"), win.leading_segment
+        why = [f"The move concentrates on {dim}={seg} — {win.concentration:.0%} of the whole change."]
+        if not math.isnan(win.leading_p):
+            why.append(f"It is statistically decisive, not sampling noise (p={win.leading_p:.0e}).")
+        why.append("Rate and mix effects separate cleanly, so the cause is well isolated.")
+        refined = (final.get("drilldown") or {}).get("refined")
+        narrowed = f", narrowed to {refined['dim']}={refined['segment']}" if refined else ""
+        return {
+            "headline": f"We found it: {dim}={seg} carries the change in {metric}.",
+            "why": why,
+            "recommendation": f"Focus on what changed for {dim}={seg}{narrowed} — leave the rest alone.",
+        }
+
+    # abstain: collect the plain reasons from the best-concentrated dimension
+    reports = final.get("reports_by_dim", {})
+    why = []
+    if reports:
+        best = max(reports.values(), key=lambda r: r.concentration)
+        why = [_WHY_ABSTAIN[g] for g in _GATE_SEQ if not best.checks.get(g, True)]
+    return {
+        "headline": f"Not sure yet — no single segment explains the change in {metric}.",
+        "why": why or ["The evidence does not point to one segment."],
+        "recommendation": "Don't act on one segment. Treat it as a broad change, or gather more data before acting.",
+    }
+
+
 def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
                        metrics: list[str], dims: list[str],
                        autopilot: bool,
@@ -160,6 +210,7 @@ def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
         "action": asdict(final["actions"][0]) if final.get("actions") else None,
         "dispatch": final.get("dispatch"),
         "contributions": contributions,
+        "analyst_note": _analyst_note(final),
         "executive_summary": final.get("executive_summary"),
         "report": final.get("report"),
         "speculations": final.get("speculations", []),

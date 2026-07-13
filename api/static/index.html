@@ -44,6 +44,16 @@
   .meta { color: var(--muted); }
   .meta b { color: var(--ink); }
 
+  .note { border: 1px solid var(--line); border-left: 4px solid var(--indigo); border-radius: 0 10px 10px 0; padding: 14px 18px; margin: 4px 0 16px; background: var(--card); }
+  .note .head { font-size: 17px; font-weight: 650; margin: 0 0 8px; }
+  .note ul { margin: 0 0 10px; padding-left: 20px; }
+  .note ul li { margin: 2px 0; }
+  .note .rec { margin: 0; } .note .rec b { color: var(--indigo); }
+  #techwrap { margin: 4px 0 8px; } #techwrap > summary { margin-bottom: 12px; }
+  .plaintrace { color: var(--ink); margin: 4px 0 10px; }
+  .plaintrace .ok { color: var(--green); font-weight: 600; }
+  .plaintrace .no { color: var(--red); }
+
   /* --- graph strip --- */
   .graph { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; margin: 4px 0 20px; }
   .gnode {
@@ -108,7 +118,7 @@
 <body>
 <main>
   <h1>prove-or-abstain</h1>
-  <p class="sub">A causal investigation agent that asserts a root cause only when the math proves it — and abstains otherwise. &nbsp;<a href="/explore" style="color:var(--indigo)">▶ watch the verdict flip from diffuse to localized →</a></p>
+  <p class="sub">A metric dropped. This tool tells you which channel caused it — or says "not sure yet" instead of guessing, when the data can't point to one. &nbsp;<a href="/explore" style="color:var(--indigo)">▶ watch it decide, live →</a></p>
 
   <div class="card">
     <div class="row">
@@ -118,7 +128,7 @@
       <button onclick="runPanel('deep')">deep</button>
       <label class="toggle"><input type="checkbox" id="autopilot"> autopilot</label>
     </div>
-    <p class="hint">clean: one segment collapses &rarr; ASSERT &nbsp;·&nbsp; diffuse: uniform drop &rarr; ABSTAIN &nbsp;·&nbsp; mixshift: mix and rates entangled &rarr; ABSTAIN &nbsp;·&nbsp; deep: one cell collapses &rarr; ASSERT, then drills down</p>
+    <p class="hint">clean: one channel collapses &rarr; we find it &nbsp;·&nbsp; diffuse: everything drops evenly &rarr; not sure yet &nbsp;·&nbsp; mixshift: mix and rates entangled &rarr; not sure yet &nbsp;·&nbsp; deep: one cell collapses &rarr; we find it, then narrow down</p>
     <div class="divider"></div>
     <p class="hint">Or investigate your own data — two CSVs with columns <code>metric, &lt;dimensions...&gt;, n, c</code> (see <code>examples/</code>):</p>
     <div class="row">
@@ -143,6 +153,11 @@
       <span class="meta" id="rootcause"></span>
     </div>
 
+    <div class="note" id="note" style="display:none"></div>
+    <p class="plaintrace" id="plaintrace"></p>
+
+    <details id="techwrap"><summary>show the technical detail (gates, decomposition, graph)</summary>
+
     <p class="report" id="exec" style="font-style:normal;font-weight:500;display:none"></p>
 
     <div class="graph" id="graph"></div>
@@ -162,6 +177,8 @@
     </div>
 
     <p class="drill" id="drill"></p>
+    </details>
+
     <div class="action" id="action"></div>
     <p class="report" id="report"></p>
     <div class="spec" id="spec"></div>
@@ -259,6 +276,31 @@ function tracedNodes(trace) {
     if (m && NODES.includes(m[1])) { fired.add(m[1]); counts[m[1]] = (counts[m[1]] || 0) + 1; }
   }
   return {fired, laps: counts.hypothesizer || 0};
+}
+
+// plain-language version of the dimension trace: what was tried, and why each
+// was kept or dropped — no node names, no gate jargon.
+const REASON_PLAIN = {
+  "diffuse cause": "the drop was spread out, not concentrated",
+  "not significant": "the move was within normal noise",
+  "entangled mechanism": "rate and mix effects were tangled together",
+  "low combined confidence": "the signal was too weak to trust",
+  "negligible anomaly": "the move was too small to matter",
+};
+function plainReason(reason) {
+  if (!reason) return '';
+  for (const [k, v] of Object.entries(REASON_PLAIN)) if (reason.includes(k)) return v;
+  return reason;
+}
+function renderPlainTrace(b) {
+  const el = $('plaintrace');
+  const tr = b.dimension_trace || [];
+  if (!tr.length) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  const parts = tr.map(t => t.verdict === 'ASSERT'
+    ? `checked <b>${t.dimension}</b> → <span class="ok">this is it</span>`
+    : `checked <b>${t.dimension}</b> → <span class="no">ruled out</span> (${plainReason(t.rejection_reason)})`);
+  el.innerHTML = 'How it got there: ' + parts.join(' &nbsp;·&nbsp; ');
 }
 
 function renderGraph(b) {
@@ -373,17 +415,28 @@ function render(b) {
   $('result').style.display = 'block';
 
   const v = b.verdict || 'NO_ANOMALY';
-  $('verdict').textContent = v;
+  const VLABEL = {ASSERT: 'WE FOUND IT', ABSTAIN: 'NOT SURE YET', NO_ANOMALY: 'NO REAL CHANGE'};
+  $('verdict').textContent = VLABEL[v] || v;
   $('verdict').className = 'badge ' + (v === 'ASSERT' ? 'assert' : v === 'ABSTAIN' ? 'abstain' : 'none');
   $('confidence').innerHTML = b.confidence != null ? `confidence <b>${b.confidence.toFixed(2)}</b>` : '';
   $('rootcause').innerHTML = b.root_cause
     ? `root cause <b>${b.root_cause.dimension} = ${b.root_cause.segment}</b>`
     : (v === 'ABSTAIN' ? 'no localized cause' : '');
 
+  const n = b.analyst_note;
+  $('note').style.display = n ? 'block' : 'none';
+  if (n) {
+    $('note').innerHTML =
+      `<p class="head">${n.headline}</p>`
+      + (n.why && n.why.length ? `<ul>${n.why.map(w => `<li>${w}</li>`).join('')}</ul>` : '')
+      + `<p class="rec"><b>What to do:</b> ${n.recommendation}</p>`;
+  }
+
   const ex = b.executive_summary;
   $('exec').style.display = ex ? 'block' : 'none';
   if (ex) $('exec').textContent = ex;
 
+  renderPlainTrace(b);
   renderGraph(b);
   renderGates(b);
   renderWaterfall(b);
