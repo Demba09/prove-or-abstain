@@ -192,6 +192,26 @@ With autopilot on (`"autopilot": true`), an ASSERT with confidence ≥ 0.70
 returns an `EXECUTE` action instead of a recommendation. An ABSTAIN never
 executes, regardless of flags; the test suite enforces this.
 
+### Action dispatch
+
+An `EXECUTE` action is dispatched to a sink (`sinks.py`): if
+`ACTION_WEBHOOK_URL` is set, the agent POSTs the action to that endpoint
+(Slack, an ops webhook, a queue) and the response carries a `dispatch`
+receipt — `{dispatched, target, detail}`. With no URL configured it is a
+**dry run**: the receipt reports what it *would* send and no network call is
+made, so the default setup stays offline and deterministic. Only an `EXECUTE`
+is ever dispatched — every `RECOMMEND` and `ESCALATE` (and so every
+`ABSTAIN`) returns `dispatched: false` without touching the network, which is
+the second line of the same safety property the actuator enforces, and it is
+tested directly.
+
+```bash
+export ACTION_WEBHOOK_URL=https://hooks.example.com/…
+curl -X POST localhost:8000/investigate \
+  -H 'content-type: application/json' -d '{"panel":"clean","autopilot":true}'
+# -> action.kind = EXECUTE, dispatch.dispatched = true
+```
+
 ### Bring your own data
 
 `POST /investigate/upload` takes two CSVs in long panel format — one row per
@@ -252,7 +272,9 @@ docker run -p 8000:8000 -e DASHSCOPE_API_KEY=... prove-or-abstain
 ```
 
 Secrets are injected at runtime; `.env` is excluded from the image. Without
-a key the service falls back to mock mode. For Alibaba Cloud, push an
+a key the service falls back to mock mode; set `ACTION_WEBHOOK_URL` (also at
+runtime) to dispatch autopilot `EXECUTE` actions to a real endpoint. For
+Alibaba Cloud, push an
 amd64 image to Container Registry and run it on Function Compute
 (custom-container runtime, port 8000, HTTP trigger) — `/health` serves as
 the probe endpoint.
@@ -269,8 +291,9 @@ docker buildx build --platform linux/amd64 \
 - The rolling baseline pools prior periods; there is no seasonality or trend
   modelling.
 - Drill-down goes one level deep (winning segment × one other dimension).
-- Actions are typed objects returned by the API; nothing is wired to real
-  downstream systems.
+- Action dispatch is a single generic webhook (`ACTION_WEBHOOK_URL`); there
+  are no first-class connectors (Slack/Jira/Stripe) or a closed loop that
+  observes the effect of an executed action yet.
 
 ## License
 

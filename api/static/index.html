@@ -349,7 +349,15 @@ function render(b) {
   }
 
   $('action').style.display = b.action ? 'block' : 'none';
-  if (b.action) $('action').innerHTML = `<b>${b.action.kind}</b> — ${b.action.detail}`;
+  if (b.action) {
+    let html = `<b>${b.action.kind}</b> — ${b.action.detail}`;
+    if (b.dispatch) {
+      const d = b.dispatch;
+      const label = d.dispatched ? '✓ dispatched to sink' : '○ not dispatched';
+      html += `<div class="hint" style="margin:6px 0 0"><b>${label}</b> — ${d.detail}</div>`;
+    }
+    $('action').innerHTML = html;
+  }
 
   $('report').textContent = b.report || '';
 

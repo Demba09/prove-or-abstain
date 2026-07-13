@@ -90,11 +90,58 @@ def test_abstain_never_executes():
         assert body["action"]["kind"] == "ESCALATE"
 
 
+def test_abstain_never_dispatches():
+    # Second line of the same property: an ABSTAIN action never reaches a sink.
+    for panel in ("diffuse", "mixshift"):
+        body = client.post("/investigate", json={"panel": panel,
+                                                 "autopilot": True}).json()
+        assert body["dispatch"]["dispatched"] is False
+
+
 def test_autopilot_executes_on_proof():
     body = client.post("/investigate", json={"panel": "clean",
                                              "autopilot": True}).json()
     assert body["action"]["kind"] == "EXECUTE"
     assert body["confidence"] >= 0.70
+
+
+def test_execute_dispatches_to_sink():
+    # With ACTION_WEBHOOK_URL unset, an EXECUTE is a dry run: it reports what it
+    # would send, dispatches nothing, and makes no network call.
+    from sinks import dispatch_action
+    from agent_state import Action
+    execute = Action("EXECUTE", "conversion", "segment", "paid", "scoped action")
+    receipt = dispatch_action(execute)
+    assert receipt["dispatched"] is False and "dry run" in receipt["detail"]
+    # A RECOMMEND/ESCALATE is never even a candidate for dispatch.
+    escalate = Action("ESCALATE", "conversion", None, None, "no cause")
+    assert dispatch_action(escalate)["dispatched"] is False
+
+
+def test_execute_dispatches_when_webhook_set(monkeypatch):
+    # With a webhook configured, an EXECUTE posts to it. Stub the transport so
+    # the test makes no real network call.
+    import sinks
+    from agent_state import Action
+    sent = {}
+
+    class _Resp:
+        def getcode(self): return 200
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+
+    def _fake_urlopen(req, timeout=None):
+        sent["url"] = req.full_url
+        sent["body"] = req.data
+        return _Resp()
+
+    monkeypatch.setenv("ACTION_WEBHOOK_URL", "https://example.test/hook")
+    monkeypatch.setattr(sinks.urllib.request, "urlopen", _fake_urlopen)
+    receipt = sinks.dispatch_action(
+        Action("EXECUTE", "conversion", "segment", "paid", "scoped action"))
+    assert receipt["dispatched"] is True
+    assert sent["url"] == "https://example.test/hook"
+    assert b"prove_or_abstain.execute" in sent["body"]
 
 
 def test_unknown_panel_rejected():

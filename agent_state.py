@@ -72,6 +72,7 @@ class AgentState(TypedDict, total=False):
 
     # --- output ---
     actions: list[Action]
+    dispatch: dict                  # sink receipt for the action (EXECUTE only)
     report: str
     speculations: list[str]         # LLM business hypotheses, labelled speculation
     trace: list[str]                # readable investigation log

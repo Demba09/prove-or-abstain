@@ -25,6 +25,7 @@ from gates import evaluate_gates, MATERIAL_REL
 from agent_state import AgentState, MetricAnomaly, Action
 from panels import metric_totals, project
 from llm import get_client, template_report
+from sinks import dispatch_action
 
 
 def _log(state: AgentState, msg: str) -> list[str]:
@@ -249,11 +250,19 @@ def actuator(state: AgentState) -> dict:
             detail += f" Best concentration={best.concentration:.2f} (below threshold)."
         action = Action("ESCALATE", metric, None, None, detail)
 
+    # dispatch: only an EXECUTE reaches a real sink. Every other kind — and so
+    # every ABSTAIN — returns a no-op receipt without touching the network.
+    dispatch = dispatch_action(action)
+    dispatch_msg = ("dispatched" if dispatch["dispatched"]
+                    else f"not dispatched ({dispatch['detail']})")
+
     return {
         "verdict": verdict,
         "confidence": conf,
         "actions": [action],
-        "trace": _log(state, f"actuator: {verdict} -> action {action.kind}."),
+        "dispatch": dispatch,
+        "trace": _log(state,
+            f"actuator: {verdict} -> action {action.kind}; {dispatch_msg}."),
     }
 
 

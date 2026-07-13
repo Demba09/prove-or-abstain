@@ -125,6 +125,7 @@ def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
             else None
         ),
         "action": asdict(final["actions"][0]) if final.get("actions") else None,
+        "dispatch": final.get("dispatch"),
         "contributions": contributions,
         "report": final.get("report"),
         "speculations": final.get("speculations", []),
