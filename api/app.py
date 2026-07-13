@@ -37,12 +37,26 @@ load_dotenv()  # local: reads .env; in the container the file is absent
                # (.dockerignore) and runtime-injected variables win anyway.
 
 from graph import APP as INVESTIGATION_GRAPH
+from llm import get_client
 from panels import BASELINE, CLEAN, DEEP, DIFFUSE, MIXSHIFT, split_series
 
 app = FastAPI(title="prove-or-abstain", version="0.4.0")
 
 # The four demo panels: CLEAN/DEEP -> ASSERT, DIFFUSE/MIXSHIFT -> ABSTAIN.
 _PANELS = {"clean": CLEAN, "diffuse": DIFFUSE, "mixshift": MIXSHIFT, "deep": DEEP}
+# Short descriptions handed to the LLM router (/investigate/query) — it
+# SELECTS one of these, it cannot invent a panel outside this dict.
+_PANEL_DESCRIPTIONS = {
+    "clean": "one segment's rate collapses while everything else is stable; "
+             "localizes to a single cause",
+    "diffuse": "every segment drops by the same amount; no segment stands "
+               "out, cause does not localize",
+    "mixshift": "population mix and rates shift at the same time, entangled "
+                "effects, cause does not localize cleanly",
+    "deep": "a single narrow cell collapses; localizes, then a drill-down "
+            "narrows it further",
+}
+_METRICS = ["conversion", "activation"]
 _STATIC = Path(__file__).parent / "static"
 _REQUIRED = {"metric", "n", "c"}             # mandatory long-panel columns
 _RESERVED = _REQUIRED | {"period"}           # non-dimension columns
@@ -51,6 +65,11 @@ _RESERVED = _REQUIRED | {"period"}           # non-dimension columns
 class InvestigateRequest(BaseModel):
     panel: Literal["clean", "diffuse", "mixshift", "deep"] = "clean"
     autopilot: bool = False   # only takes effect on ASSERT + confidence >= 0.70
+
+
+class QueryRequest(BaseModel):
+    query: str                # free-text question, e.g. "why did conversion drop?"
+    autopilot: bool = False
 
 
 def _jsonable(v):
@@ -103,6 +122,7 @@ def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
         "action": asdict(final["actions"][0]) if final.get("actions") else None,
         "report": final.get("report"),
         "speculations": final.get("speculations", []),
+        "llm": final.get("llm"),
         "trace": final.get("trace", []),
     })
 
@@ -121,11 +141,30 @@ def health() -> dict:
 def investigate(req: InvestigateRequest) -> dict:
     result = _run_investigation(
         BASELINE, _PANELS[req.panel],
-        metrics=["conversion", "activation"],
+        metrics=_METRICS,
         dims=["device", "segment"],
         autopilot=req.autopilot,
     )
     return {"panel": req.panel, **result}
+
+
+@app.post("/investigate/query")
+def investigate_query(req: QueryRequest) -> dict:
+    """Free-text front-end over the built-in panels: Qwen SELECTS one of
+    the four demo panels/metrics from `req.query` (never invents one —
+    guarded in llm.route_query), then the same deterministic pipeline runs
+    unchanged. Demonstrates the LLM boundary on a natural-language intent
+    rather than a hardcoded panel name."""
+    if not req.query.strip():
+        raise HTTPException(400, "query must not be empty")
+    routed = get_client().route_query(req.query, _PANEL_DESCRIPTIONS, _METRICS)
+    result = _run_investigation(
+        BASELINE, _PANELS[routed["panel"]],
+        metrics=_METRICS,
+        dims=["device", "segment"],
+        autopilot=req.autopilot,
+    )
+    return {"panel": routed["panel"], "routing": routed, **result}
 
 
 def _read_panel(upload: UploadFile, name: str) -> pd.DataFrame:
