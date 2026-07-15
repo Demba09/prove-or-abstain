@@ -146,6 +146,45 @@ def test_upload_rejects_missing_column():
     assert "missing required column" in r.json()["detail"]
 
 
+def test_upload_rejects_negative_counts():
+    from panels import BASELINE, CLEAN
+    bad = BASELINE.copy()
+    bad.loc[0, "n"] = -5
+    r = client.post("/investigate/upload", files={
+        "baseline": ("baseline.csv", _csv(bad), "text/csv"),
+        "current": ("current.csv", _csv(CLEAN), "text/csv"),
+    })
+    assert r.status_code == 400
+    assert "negative" in r.json()["detail"]
+
+
+def test_upload_rejects_missing_values():
+    from panels import BASELINE, CLEAN
+    bad = BASELINE.copy()
+    bad.loc[0, "c"] = np.nan
+    r = client.post("/investigate/upload", files={
+        "baseline": ("baseline.csv", _csv(bad), "text/csv"),
+        "current": ("current.csv", _csv(CLEAN), "text/csv"),
+    })
+    assert r.status_code == 400
+    assert "missing values" in r.json()["detail"]
+
+
+def test_upload_rejects_c_over_n_on_rate_metric():
+    # c > n makes no sense for a rate (successes out of n); it must be a
+    # 400, not a silent nonsense verdict. Sum metrics stay exempt —
+    # test_sum_metric_upload_asserts covers that (revenue has c >> n).
+    from panels import BASELINE, CLEAN
+    bad = CLEAN.copy()
+    bad.loc[0, "c"] = bad.loc[0, "n"] + 1
+    r = client.post("/investigate/upload", files={
+        "baseline": ("baseline.csv", _csv(BASELINE), "text/csv"),
+        "current": ("current.csv", _csv(bad), "text/csv"),
+    })
+    assert r.status_code == 400
+    assert "c > n" in r.json()["detail"]
+
+
 def test_upload_rejects_mismatched_columns():
     from panels import BASELINE, CLEAN
     r = client.post("/investigate/upload", files={

@@ -212,6 +212,11 @@ curl -X POST localhost:8000/investigate/series \
 Metrics named in `sum_metrics` are decomposed as sums (volume/rate split,
 e.g. revenue = customers × average basket) instead of rates.
 
+Malformed data is rejected with a 400 before it can reach the math:
+missing or negative `n`/`c` values, and `c > n` on a rate metric (declare
+revenue-like metrics via `sum_metrics` — for those, `c` is a total and may
+exceed `n`). This applies to every data source: upload, SQL, Sheets, series.
+
 ### Live data: the SQL connector
 
 `POST /investigate/sql` skips the CSV round trip: it runs two of your own
