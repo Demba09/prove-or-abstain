@@ -76,6 +76,7 @@ but the math decides everything. Run the same scenario with `QWEN_MOCK=1` and yo
 
 ```bash
 git clone https://github.com/Demba09/prove-or-abstain
+cd prove-or-abstain
 pip install -r requirements.txt
 QWEN_MOCK=1 uvicorn api.app:app --reload
 # Open http://localhost:8000
@@ -121,7 +122,36 @@ failing condition named in the response.
 The significance gate is a real hypothesis test: a perfectly concentrated move on 60 users
 abstains with p=0.55; the same move on 6000 users asserts with p<1e-5.
 
-## Quickstart
+On ASSERT, a **confidence score** (product of the concentration, significance and
+cleanliness factors, 0..1) gates the autopilot: EXECUTE requires confidence ≥ 0.70,
+anything lower downgrades to RECOMMEND. Every EXECUTE is recorded in the audit trail
+(`GET /executions`) and, if `WEBHOOK_URL` is set, POSTed to your endpoint
+(Slack/Discord/Teams formats auto-detected) so a human sees every autonomous action.
+
+## Repository layout
+
+```
+prove_or_abstain/   core package — the deterministic pipeline
+  agent_state.py      typed state shared by the graph nodes
+  metrics.py          aggregation of the long-panel counts
+  attribution.py      rate/mix/interaction decomposition
+  gates.py            the 4 verification gates + confidence score
+  nodes.py            detector → hypothesizer → investigator → verifier → …
+  graph.py            the compiled LangGraph state machine
+  llm.py              the Qwen boundary (mock mode, routing, wording)
+  panels.py           built-in demo scenarios
+  autopilot.py        execution tracker + monitoring dashboard state
+  webhook.py          outbound notifications on EXECUTE
+  connectors/         SQL (Postgres/MySQL/SQLite) and Google Sheets
+api/                deployment entry point — FastAPI app + static demo page
+mcp_server.py       MCP entry point for Qwen Cloud agents
+scripts/            validation & demo tooling (see below)
+tests/              pytest suite (46 tests, runs offline with QWEN_MOCK=1)
+examples/           sample CSVs for the upload endpoints
+docs/               architecture diagram, demo script, devpost text
+```
+
+## Development setup
 
 Requires Python 3.12+.
 
@@ -130,6 +160,30 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 QWEN_MOCK=1 pytest -q
 QWEN_MOCK=1 uvicorn api.app:app --reload
+```
+
+### Configuration
+
+Copy `.env.example` to `.env` (never committed, excluded from the Docker image):
+
+| Variable | Effect |
+|----------|--------|
+| `DASHSCOPE_API_KEY` | Qwen/DashScope key. Absent → the app runs in deterministic mock mode |
+| `QWEN_BASE_URL` | DashScope endpoint — intl vs mainland China accounts differ, see `.env.example` |
+| `QWEN_MODEL` | model name, defaults to `qwen-plus` |
+| `QWEN_MOCK=1` | force mock mode even with a key set |
+| `WEBHOOK_URL` | where EXECUTE notifications are POSTed — payload auto-formats for Slack, Discord or Teams from the hostname, generic JSON otherwise. Absent → stdout |
+
+### Validate the pipeline yourself
+
+Every layer has an independent check that runs offline:
+
+```bash
+python scripts/gate_check.py        # math layer vs a hand-written oracle
+python scripts/gate_check_gates.py  # decision layer on 3 calibrated scenarios
+python scripts/simulate.py          # full flow without LangGraph, mock-forced
+python scripts/run_phase1.py        # the 2 headline scenarios through the real graph
+python scripts/check_qwen.py        # is my DashScope key/endpoint alive?
 ```
 
 ## API
@@ -245,7 +299,7 @@ With MCP, a Qwen agent:
 | **Handle ambiguous inputs** | `/investigate/query` — Qwen routes free-text questions to the right scenario |
 | **Invoke external tools** | SQL connector, Google Sheets connector, CSV upload, time series |
 | **Human-in-the-loop checkpoints** | ABSTAIN always escalates; autopilot requires confidence ≥ 0.70 to execute |
-| **Production-ready, not toy demo** | Docker, CI, 46 tests, full audit trail, Swagger docs |
+| **Production-ready, not toy demo** | Docker, CI, 46 tests, full audit trail, API docs at `/docs` (ReDoc) |
 
 **Qwen Cloud integration:** `prove_or_abstain/llm.py` calls Qwen via DashScope for dimension ordering,
 report phrasing, and query routing only. The math (pandas, numpy) and statistics
