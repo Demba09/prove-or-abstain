@@ -34,7 +34,7 @@ class Execution:
 @dataclass
 class Dashboard:
     """Snapshot returned by GET /dashboard."""
-    version: str = "0.5.0"
+    version: str = "0.4.0"
     last_check_at: float | None = None
     last_check_verdict: str | None = None
     active_alerts: list = field(default_factory=list)
@@ -84,6 +84,10 @@ def resolve_execution(key: str, resolved_by: str = "human") -> Execution | None:
     entry.resolved_at = time.time()
     entry.resolved_by = resolved_by
     return entry
+
+
+def get_executions() -> dict[str, Execution]:
+    return dict(_EXECUTIONS)
 
 
 def record_check(verdict: str | None = None) -> None:

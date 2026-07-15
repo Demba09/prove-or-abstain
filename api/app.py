@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
-from autopilot import get_dashboard, record_check, resolve_execution
+from autopilot import get_dashboard, record_check, resolve_execution, record_execution, get_executions
 from connectors.gsheets import SheetError
 from connectors.gsheets import fetch_panel as fetch_sheet_panel
 from connectors.sql import SqlQueryError, fetch_panel as fetch_sql_panel
@@ -121,6 +121,16 @@ def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
 
     win = final.get("winning_report")
     drill = final.get("drilldown")
+
+    actions = final.get("actions")
+    if actions and actions[0].kind == "EXECUTE":
+        a = actions[0]
+        record_execution(
+            a.metric, a.dim, a.segment, final.get("confidence", 0.0),
+            a.kind, a.detail,
+            final.get("report", ""), final.get("trace", []),
+        )
+
     return _jsonable({
         "verdict": final.get("verdict"),
         "confidence": final.get("confidence"),
@@ -370,23 +380,20 @@ def investigate_check() -> dict:
 
     An ASSERT+EXECUTE that fires creates an execution record visible at
     GET /dashboard and POST /executions/{id}/resolve."""
-    record_check()
     results = []
     for panel_name, panel_df in _PANELS.items():
         result = _run_investigation(
             BASELINE, panel_df,
             metrics=_METRICS,
             dims=["device", "segment"],
-            autopilot=True,  # autonomous: always auto-execute on high confidence
+            autopilot=True,
         )
         result["panel"] = panel_name
         results.append(result)
 
     verdicts = [r["verdict"] for r in results]
     summary_verdict = "ASSERT_ACTED" if "ASSERT" in verdicts else "NO_ANOMALY"
-    if not any(v == "ASSERT" for v in verdicts):
-        record_check(summary_verdict)
-
+    record_check(summary_verdict)
     return {"verdict": summary_verdict, "panels": results}
 
 
@@ -397,7 +404,7 @@ def dashboard() -> dict:
 
 @app.get("/executions", include_in_schema=True)
 def list_executions() -> dict:
-    from autopilot import _EXECUTIONS as ex
+    ex = get_executions()
     return {"executions": [asdict(e) for e in ex.values()]}
 
 
