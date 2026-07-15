@@ -1,6 +1,15 @@
+<!-- PROVE-OR-ABSTAIN -->
+<p align="center">
+  <img src="https://img.alicdn.com/imgextra/i3/O1CN01k1oD3R1Glhjj4hE2r_!!6000000000663-55-tps-158-28.svg" width="80" alt="logo" />
+</p>
+
 # prove-or-abstain
 
-![CI](https://github.com/Demba09/prove-or-abstain/actions/workflows/ci.yml/badge.svg)
+[![CI](https://github.com/Demba09/prove-or-abstain/actions/workflows/ci.yml/badge.svg)](https://github.com/Demba09/prove-or-abstain/actions)
+[![Stars](https://img.shields.io/github/stars/Demba09/prove-or-abstain?style=social)](https://github.com/Demba09/prove-or-abstain)
+[![Forks](https://img.shields.io/github/forks/Demba09/prove-or-abstain?style=social)](https://github.com/Demba09/prove-or-abstain)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 
 A causal investigation agent for product metrics. Given a baseline period and
 a current period, it determines whether a metric moved materially, tests which
