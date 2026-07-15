@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 
 load_dotenv()  # local: reads .env; in the container the file is absent
@@ -153,6 +153,11 @@ def home() -> FileResponse:
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/docs", include_in_schema=False)
+def docs():
+    return RedirectResponse(url="/redoc")
 
 
 @app.get("/panels/{name}")
