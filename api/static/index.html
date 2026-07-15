@@ -231,7 +231,7 @@ footer a { color: var(--accent-strong); }
   <header class="top">
     <h1>prove&#8209;or&#8209;abstain</h1>
   </header>
-  <p class="sub">A causal investigation agent that asserts a root cause only when the math proves it — and abstains otherwise.</p>
+  <p class="sub">An AI agent that investigates metric changes. It acts when the data proves a cause — and refuses to guess otherwise.</p>
 
   <div class="panel">
     <fieldset>
@@ -488,8 +488,8 @@ function render(b) {
     el.innerHTML =
       `<h3><span class="dim">dimension: ${dim}</span><span class="chip ${g.verdict.toLowerCase()}">${g.verdict}</span></h3>
        <ul>${g.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
-       <div class="data-row">leader <span>${g.leading_segment ?? '—'}</span> concentration <span>${g.concentration.toFixed(2)}</span>
-         interaction <span>${g.interaction_share.toFixed(2)}</span> n <span>${g.leading_sample_n ?? '—'}</span>${pval}</div>`;
+       <div class="data-row">leader <span>${g.leading_segment ?? '—'}</span> share <span>${g.concentration.toFixed(2)}</span>
+          entanglement <span>${g.interaction_share.toFixed(2)}</span> users <span>${g.leading_sample_n ?? '—'}</span>${pval}</div>`;
     exhibits.appendChild(el);
   }
 
@@ -498,7 +498,7 @@ function render(b) {
   if (d) {
     const parent = `${d.parent.dim} = ${d.parent.segment}`;
     $('drilldown').innerHTML = d.refined
-      ? `drill-down: within <b>${parent}</b>, the cause narrows to <b>${d.refined.dim} = ${d.refined.segment}</b> (concentration ${d.refined.concentration.toFixed(2)})`
+      ? `drill-down: within <b>${parent}</b>, the cause narrows to <b>${d.refined.dim} = ${d.refined.segment}</b> (share ${d.refined.concentration.toFixed(2)})`
       : `drill-down: within <b>${parent}</b>, no sub-dimension localizes further — the whole segment is affected`;
   }
 
