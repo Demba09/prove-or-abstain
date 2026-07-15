@@ -224,6 +224,23 @@ footer a { color: var(--accent-strong); }
 .advanced > summary { cursor: pointer; color: var(--muted); user-select: none; padding: 4px 0; }
 .advanced > summary:hover { color: var(--accent-strong); }
 .advanced-body { padding: 0 0 4px; }
+
+#dash-panel { display: none; }
+.dash-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.dash-header h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin: 0; }
+.dash-stats { display: flex; gap: 20px; font-size: 13px; color: var(--muted); flex-wrap: wrap; margin-bottom: 16px; }
+.dash-stats .stat { text-align: center; }
+.dash-stats .stat b { display: block; font-size: 19px; color: var(--ink); }
+.dash-alert { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.dash-alert.active { border-color: var(--abstain); background: var(--abstain-bg); }
+.dash-alert.resolved { opacity: .6; }
+.dash-alert .info { flex: 1; min-width: 200px; }
+.dash-alert .info .cause { font-weight: 600; color: var(--ink); }
+.dash-alert .info .meta { font-size: 12.5px; color: var(--muted); }
+.dash-alert .resolve-btn { font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 6px; cursor: pointer; border: 1px solid var(--accent); background: var(--card); color: var(--accent); }
+.dash-alert .resolve-btn:hover { background: var(--accent); color: #fff; }
+.dash-alert .resolved-tag { font-size: 12px; color: var(--assert); font-weight: 600; }
+.dash-empty { color: var(--muted); font-size: 13.5px; padding: 8px 0; }
 </style>
 </head>
 <body>
@@ -359,6 +376,16 @@ footer a { color: var(--accent-strong); }
       <summary>investigation trace</summary>
       <ol class="trace-log" id="trace"></ol>
     </details>
+  </div>
+
+  <div class="panel" id="dash-panel">
+    <div class="dash-header">
+      <h2>Autopilot Dashboard</h2>
+      <button class="secondary" type="button" id="dash-check-btn" onclick="runAutonomousCheck()">run autonomous check</button>
+    </div>
+    <div class="dash-stats" id="dash-stats"></div>
+    <div id="dash-alerts"></div>
+    <div class="dash-empty" id="dash-empty">Loading&hellip;</div>
   </div>
 
   <footer>
@@ -642,6 +669,88 @@ $('query').addEventListener('keydown', e => { if (e.key === 'Enter') runQuery();
 $('uploadBtn').addEventListener('click', runUpload);
 $('sqlBtn').addEventListener('click', runSql);
 $('sheetsBtn').addEventListener('click', runSheets);
+
+// ---------------------------------------------------------------- dashboard
+async function loadDashboard() {
+  try {
+    const r = await fetch('/dashboard');
+    if (!r.ok) return;
+    const d = await r.json();
+    renderDashboard(d);
+  } catch { /* dashboard is optional — don't break the main UI */ }
+}
+
+function renderDashboard(d) {
+  $('dash-panel').style.display = 'block';
+
+  const stats = $('dash-stats');
+  const lastCheck = d.last_check_at ? new Date(d.last_check_at * 1000).toLocaleTimeString() : 'never';
+  const uptimeMin = Math.floor(d.uptime_seconds / 60);
+  stats.innerHTML =
+    `<div class="stat"><b>${d.total_checks}</b>checks</div>
+     <div class="stat"><b>${d.total_executions}</b>executions</div>
+     <div class="stat"><b>${d.active_alerts.filter(a => !a.resolved).length}</b>active alerts</div>
+     <div class="stat"><b>${lastCheck}</b>last check</div>
+     <div class="stat"><b>${uptimeMin}m</b>uptime</div>`;
+
+  const alerts = $('dash-alerts');
+  alerts.innerHTML = '';
+  const empty = $('dash-empty');
+
+  if (!d.active_alerts.length) {
+    empty.textContent = 'No alerts yet — run an autonomous check or investigate a scenario with autopilot ON.';
+    empty.style.display = 'block';
+    return;
+  }
+
+  empty.style.display = 'none';
+  d.active_alerts.sort((a, b) => b.created_at - a.created_at).forEach(a => {
+    const el = document.createElement('div');
+    el.className = 'dash-alert ' + (a.resolved ? 'resolved' : 'active');
+    const time = new Date(a.created_at * 1000).toLocaleString();
+    el.innerHTML =
+      `<div class="info">
+         <div class="cause">${a.id}</div>
+         <div class="meta">${a.detail} · ${time}</div>
+       </div>` +
+      (a.resolved
+        ? `<span class="resolved-tag">resolved by ${a.resolved_by || 'human'}</span>`
+        : `<button class="resolve-btn" onclick="resolveAlert('${a.id.replace(/'/g, "\\'")}')">resolve</button>`);
+    alerts.appendChild(el);
+  });
+}
+
+async function resolveAlert(id) {
+  try {
+    const r = await fetch('/executions/' + encodeURIComponent(id) + '/resolve', {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({id, resolved_by: 'human'}),
+    });
+    if (r.ok) loadDashboard();
+  } catch { fail('Could not resolve alert.'); }
+}
+
+async function runAutonomousCheck() {
+  clearFail();
+  setBusy(true);
+  try {
+    const r = await fetch('/investigate/check', {method: 'POST'});
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.detail || r.statusText);
+    alert('Autonomous check complete: ' + body.verdict + '\n' +
+      body.panels.map(p => '  ' + p.panel + ' → ' + p.verdict + ' (' + p.action.kind + ')').join('\n'));
+    loadDashboard();
+  } catch (e) {
+    fail(e.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+// load dashboard on page load + refresh every 30s
+loadDashboard();
+setInterval(loadDashboard, 30000);
 </script>
 </body>
 </html>
