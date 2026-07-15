@@ -31,11 +31,11 @@ import pandas as pd
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
-load_dotenv()  # local: reads .env; in the container the file is absent
-               # (.dockerignore) and runtime-injected variables win anyway.
+load_dotenv()
 
+from autopilot import get_dashboard, record_check, resolve_execution
 from connectors.gsheets import SheetError
 from connectors.gsheets import fetch_panel as fetch_sheet_panel
 from connectors.sql import SqlQueryError, fetch_panel as fetch_sql_panel
@@ -358,3 +358,57 @@ def investigate_series(series: UploadFile = File(...),
     result = _investigate_pair(base, curr, "series baseline", "series current",
                                autopilot, sum_metrics)
     return {"panel": "series", **result}
+
+
+# ----------------------------------------------------------- autonomous autopilot
+@app.post("/investigate/check")
+def investigate_check() -> dict:
+    """Autonomous monitoring endpoint — runs the investigation on ALL four
+    built-in panels with autopilot ON. Designed to be called by a scheduler
+    (cron, Alibaba Cloud SchedulerX, etc.). Returns a summary of what was
+    detected and any actions taken.
+
+    An ASSERT+EXECUTE that fires creates an execution record visible at
+    GET /dashboard and POST /executions/{id}/resolve."""
+    record_check()
+    results = []
+    for panel_name, panel_df in _PANELS.items():
+        result = _run_investigation(
+            BASELINE, panel_df,
+            metrics=_METRICS,
+            dims=["device", "segment"],
+            autopilot=True,  # autonomous: always auto-execute on high confidence
+        )
+        result["panel"] = panel_name
+        results.append(result)
+
+    verdicts = [r["verdict"] for r in results]
+    summary_verdict = "ASSERT_ACTED" if "ASSERT" in verdicts else "NO_ANOMALY"
+    if not any(v == "ASSERT" for v in verdicts):
+        record_check(summary_verdict)
+
+    return {"verdict": summary_verdict, "panels": results}
+
+
+@app.get("/dashboard", include_in_schema=True)
+def dashboard() -> dict:
+    return asdict(get_dashboard())
+
+
+@app.get("/executions", include_in_schema=True)
+def list_executions() -> dict:
+    from autopilot import _EXECUTIONS as ex
+    return {"executions": [asdict(e) for e in ex.values()]}
+
+
+class ResolveRequest(BaseModel):
+    id: str
+    resolved_by: str = Field(default="human")
+
+
+@app.post("/executions/{exec_id}/resolve", include_in_schema=True)
+def resolve_exec(exec_id: str, body: ResolveRequest) -> dict:
+    entry = resolve_execution(exec_id, body.resolved_by)
+    if entry is None:
+        raise HTTPException(404, f"execution {exec_id!r} not found or already resolved")
+    return {"resolved": asdict(entry)}
