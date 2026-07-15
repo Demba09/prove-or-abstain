@@ -142,9 +142,12 @@ POST /investigate/upload   CSV upload (multipart: baseline + current)
 POST /investigate/sql      live database: { "dsn": "...", "baseline_query": "...", "current_query": "..." }
 POST /investigate/sheets   live Google Sheets: { "baseline_url": "...", "current_url": "..." }
 POST /investigate/series   time series (multipart: series.csv + window)
+POST /investigate/check    autonomous monitor — runs all panels, auto-executes on high confidence
 GET  /panels/{name}        schema reference for SQL/Sheets/CSV
+GET  /dashboard            autopilot status, active alerts, uptime
+GET  /executions           audit trail of all EXECUTE actions
+POST /executions/{id}/resolve  human resolves an active alert
 GET  /health               healthcheck
-GET  /docs                 Swagger / ReDoc
 ```
 
 ## Bring your own data
@@ -204,6 +207,37 @@ docker run -p 8000:8000 -e DASHSCOPE_API_KEY=... prove-or-abstain
 For Alibaba Cloud: push to Container Registry, run on Function Compute (port 8000).
 `/health` serves as the probe endpoint.
 
+## Qwen Cloud MCP Server
+
+Prove-or-Abstain exposes an **MCP (Model Context Protocol)** server so Qwen Cloud
+agents can call it directly as a tool — making Qwen the primary orchestrator.
+
+```bash
+python mcp_server.py           # stdio transport — connect to Qwen Cloud
+python mcp_server.py --port 8080  # SSE transport for testing
+```
+
+**Available MCP tools:**
+
+| Tool | Description |
+|------|-------------|
+| `investigate_scenario` | Run investigation on a built-in scenario |
+| `investigate_sql` | Run investigation from a live database query |
+| `autonomous_check` | Autonomous monitoring — checks all panels with autopilot ON |
+| `get_dashboard` | View active alerts, total checks, uptime |
+| `resolve_alert` | Human-in-the-loop — mark an alert as resolved |
+| `describe_panels` | List available scenarios so Qwen knows what to call |
+| `describe_gates` | Explain the 4 verification gates |
+
+With MCP, a Qwen agent:
+1. Receives a user question (e.g., "why did conversion drop?")
+2. Calls `describe_panels` to see available scenarios
+3. Calls `investigate_scenario("clean")` and `investigate_scenario("diffuse")`
+4. Interprets the results: "The drop localizes to paid — but a diffuse scenario shows it could be systemic"
+5. Generates a human-readable response with recommendations
+
+**Qwen is now the agent. Prove-or-Abstain is its skill.**
+
 ## Built for the Qwen Cloud Hackathon — Track 4: Autopilot Agent
 
 | Requirement | Implementation |
@@ -211,7 +245,7 @@ For Alibaba Cloud: push to Container Registry, run on Function Compute (port 800
 | **Handle ambiguous inputs** | `/investigate/query` — Qwen routes free-text questions to the right scenario |
 | **Invoke external tools** | SQL connector, Google Sheets connector, CSV upload, time series |
 | **Human-in-the-loop checkpoints** | ABSTAIN always escalates; autopilot requires confidence ≥ 0.70 to execute |
-| **Production-ready, not toy demo** | Docker, CI, 43 tests, full audit trail, Swagger docs |
+| **Production-ready, not toy demo** | Docker, CI, 46 tests, full audit trail, Swagger docs |
 
 **Qwen Cloud integration:** `llm.py` calls Qwen via DashScope for dimension ordering,
 report phrasing, and query routing only. The math (pandas, numpy) and statistics

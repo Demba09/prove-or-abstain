@@ -488,8 +488,8 @@ function render(b) {
   if (b.routing) {
     setActiveTab(b.panel);
     $('routing').style.display = 'block';
-    $('routing').innerHTML = `routed to panel <b>${b.panel}</b>` +
-      (b.routing.metric ? ` · metric <b>${b.routing.metric}</b>` : '') +
+    $('routing').textContent = `routed to panel ${b.panel}` +
+      (b.routing.metric ? ` · metric ${b.routing.metric}` : '') +
       (b.routing.reason ? ` — ${b.routing.reason}` : '');
   } else {
     $('routing').style.display = 'none';
@@ -530,13 +530,13 @@ function render(b) {
   }
 
   $('action').style.display = b.action ? 'block' : 'none';
-  if (b.action) $('action').innerHTML = `<span class="kind">${b.action.kind}</span>${b.action.detail}`;
+  if (b.action) $('action').textContent = `${b.action.kind} — ${b.action.detail}`;
 
   $('report').style.display = b.report ? 'block' : 'none';
   if (b.report) {
     let html = b.report;
-    if (b.llm) html += `<span class="llm-tag">[${b.llm.mode === 'real' ? 'Qwen: ' + b.llm.model : b.llm.mode}]</span>`;
-    $('report').innerHTML = html;
+    if (b.llm) html += ` [${b.llm.mode === 'real' ? 'Qwen: ' + b.llm.model : b.llm.mode}]`;
+    $('report').textContent = html;
   }
 
   const specs = b.speculations || [];
@@ -708,14 +708,31 @@ function renderDashboard(d) {
     const el = document.createElement('div');
     el.className = 'dash-alert ' + (a.resolved ? 'resolved' : 'active');
     const time = new Date(a.created_at * 1000).toLocaleString();
-    el.innerHTML =
-      `<div class="info">
-         <div class="cause">${a.id}</div>
-         <div class="meta">${a.detail} · ${time}</div>
-       </div>` +
-      (a.resolved
-        ? `<span class="resolved-tag">resolved by ${a.resolved_by || 'human'}</span>`
-        : `<button class="resolve-btn" onclick="resolveAlert('${a.id.replace(/'/g, "\\'")}')">resolve</button>`);
+
+    const info = document.createElement('div');
+    info.className = 'info';
+    const cause = document.createElement('div');
+    cause.className = 'cause';
+    cause.textContent = a.id;
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = a.detail + ' · ' + time;
+    info.appendChild(cause);
+    info.appendChild(meta);
+    el.appendChild(info);
+
+    if (a.resolved) {
+      const tag = document.createElement('span');
+      tag.className = 'resolved-tag';
+      tag.textContent = 'resolved by ' + (a.resolved_by || 'human');
+      el.appendChild(tag);
+    } else {
+      const btn = document.createElement('button');
+      btn.className = 'resolve-btn';
+      btn.textContent = 'resolve';
+      btn.onclick = function() { resolveAlert(a.id); };
+      el.appendChild(btn);
+    }
     alerts.appendChild(el);
   });
 }
