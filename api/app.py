@@ -36,6 +36,7 @@ from pydantic import BaseModel, Field
 load_dotenv()
 
 from autopilot import get_dashboard, record_check, resolve_execution, record_execution, get_executions
+from webhook import notify
 from connectors.gsheets import SheetError
 from connectors.gsheets import fetch_panel as fetch_sheet_panel
 from connectors.sql import SqlQueryError, fetch_panel as fetch_sql_panel
@@ -125,11 +126,15 @@ def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
     actions = final.get("actions")
     if actions and actions[0].kind == "EXECUTE":
         a = actions[0]
+        cause = f"{a.dim}={a.segment}" if a.dim else None
         record_execution(
             a.metric, a.dim, a.segment, final.get("confidence", 0.0),
             a.kind, a.detail,
             final.get("report", ""), final.get("trace", []),
         )
+        notify(a.metric, final.get("verdict", "ASSERT"),
+               final.get("confidence", 0.0),
+               cause, a.kind, a.detail)
 
     return _jsonable({
         "verdict": final.get("verdict"),
