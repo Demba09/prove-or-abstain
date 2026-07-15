@@ -1,30 +1,57 @@
+<!-- PROVE-OR-ABSTAIN -->
+<p align="center">
+  <img src="https://img.alicdn.com/imgextra/i3/O1CN01k1oD3R1Glhjj4hE2r_!!6000000000663-55-tps-158-28.svg" width="80" alt="logo" />
+</p>
+
 # prove-or-abstain
 
-![CI](https://github.com/Demba09/prove-or-abstain/actions/workflows/ci.yml/badge.svg)
+[![CI](https://github.com/Demba09/prove-or-abstain/actions/workflows/ci.yml/badge.svg)](https://github.com/Demba09/prove-or-abstain/actions)
+[![Stars](https://img.shields.io/github/stars/Demba09/prove-or-abstain?style=social)](https://github.com/Demba09/prove-or-abstain)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 
-A causal investigation agent for product metrics. Given a baseline period and
-a current period, it determines whether a metric moved materially, tests which
-segment explains the move, and returns one of two verdicts:
+<br>
 
-- **ASSERT** — the cause is localized and quantified, and the conclusion
-  passes every verification gate. The agent recommends a scoped action, or
-  executes it directly when autopilot is enabled and confidence is high.
-- **ABSTAIN** — the evidence does not single out a cause. The agent escalates
-  to a human and states which gate failed and why.
+> **"Conversion dropped 3% this week. Campaign? Bug? Market?"**
+>
+> Analytics tools will always give you an answer. Prove-or-Abstain is different.  
+> It investigates, tests, and **refuses to guess** when the data doesn't prove a cause.
 
-The second verdict is the point of the design. An agent that is allowed to
-act on data needs a principled way to refuse to act when the data does not
-support a conclusion — otherwise it will always produce a plausible-sounding
-diagnosis, right or wrong.
+<br>
+
+## What it does
+
+A product team opens their dashboard on Monday morning. Conversion is down 3%.
+They have two choices:
+
+- **Dig through dashboards for hours**, trying to isolate which segment, device, or channel broke.
+- **Ask an agent that does it in seconds** — and only acts when the math proves it.
+
+Prove-or-Abstain investigates metric changes across your segments and returns one of two verdicts:
+
+| Verdict | Meaning | Example |
+|---------|---------|---------|
+| **ASSERT** | Cause found and proven | *"'Paid' segment's rate collapsed (p < 0.001). Recommend pausing the campaign."* |
+| **ABSTAIN** | No single cause isolated | *"Drop is real but diffuse across all segments. Cannot isolate — escalate to human."* |
+
+**The ABSTAIN verdict is the point.** An agent allowed to act on data needs a principled way to refuse — otherwise it will always produce a plausible-sounding diagnosis, right or wrong.
 
 ![architecture](docs/architecture.svg)
 
+## Try it now
+
+```bash
+git clone https://github.com/Demba09/prove-or-abstain
+pip install -r requirements.txt
+QWEN_MOCK=1 uvicorn api.app:app --reload
+# Open http://localhost:8000
+```
+
+Or **bring your own data**: SQL databases, Google Sheets, CSV uploads, or time series.
+
 ## How it works
 
-The agent is a LangGraph state machine with seven nodes and one conditional
-loop. When a dimension fails to localize the cause, the verifier routes back
-to the hypothesizer to try the next candidate dimension; the loop is bounded
-by the number of dimensions, so it always terminates.
+The agent is a LangGraph state machine with seven nodes and one conditional loop. When a dimension fails to localize the cause, the verifier routes back to the hypothesizer to try the next candidate dimension; the loop is bounded by the number of dimensions, so it always terminates.
 
 | Node | Role |
 |------|------|
@@ -318,16 +345,33 @@ docker buildx build --platform linux/amd64 \
   -t registry.<region>.aliyuncs.com/<namespace>/prove-or-abstain:v1 --push .
 ```
 
+## Built for the Qwen Cloud Hackathon
+
+This project is submitted to **Track 4: Autopilot Agent** — build an agent
+that automates real-world business workflows end-to-end.
+
+| Requirement | How we meet it |
+|-------------|---------------|
+| **Handle ambiguous inputs** | `/investigate/query` accepts free-text questions; Qwen routes them to the right analysis panel |
+| **Invoke external tools** | SQL connector (Postgres/MySQL/SQLite), Google Sheets connector |
+| **Human-in-the-loop checkpoints** | ABSTAIN never executes; autopilot requires confidence ≥ 0.70 |
+| **Production-ready** | Docker image, CI pipeline, 43 tests, FastAPI with Swagger docs |
+
+**Qwen Cloud integration:** The agent calls Qwen models via
+[DashScope](https://dashscope-intl.aliyuncs.com/compatible-mode/v1) for three
+things only — dimension ordering, report phrasing, and query routing. It
+never uses the LLM to compute a number or decide a verdict: the math (pandas,
+numpy) and the statistics (z-test, p ≤ 0.01) run independently. The verdict
+is **identical** with or without the LLM.
+
 ## Limitations
 
-- SQL (Postgres/MySQL/SQLite) and Google Sheets connectors exist; Stripe,
-  GA, and anything requiring OAuth (vs. a DSN or a shared link) are still
-  out of scope.
-- The rolling baseline pools prior periods; there is no seasonality or trend
-  modelling.
-- Drill-down goes one level deep (winning segment × one other dimension).
-- Actions are typed objects returned by the API; nothing is wired to real
-  downstream systems.
+## What's next
+
+- OAuth connectors (Stripe, GA4, Amplitude) beyond the current DSN/shared-link model
+- Seasonality and trend modelling for time series
+- Deeper drill-down (currently one level: winning segment × one other dimension)
+- Downstream actions wired to real systems (Slack alerts, feature flags, campaign pausing)
 
 ## License
 
