@@ -421,3 +421,28 @@ def test_sheets_endpoint_rejects_non_google_url():
         "current_url": "https://evil.example.com/y",
     })
     assert r.status_code == 400
+
+
+# --------------------------------------------------------------- panel data
+def test_panel_data_matches_source():
+    from panels import BASELINE, CLEAN
+    body = client.get("/panels/clean").json()
+    assert body["panel"] == "clean"
+    assert len(body["baseline"]) == len(BASELINE)
+    assert len(body["current"]) == len(CLEAN)
+    assert set(body["baseline"][0].keys()) == {"metric", "segment", "device", "n", "c"}
+
+
+def test_panel_data_rejects_unknown_panel():
+    assert client.get("/panels/bogus").status_code == 422
+
+
+def test_upload_response_echoes_dataset():
+    from panels import BASELINE, CLEAN
+    r = client.post("/investigate/upload", files={
+        "baseline": ("baseline.csv", _csv(BASELINE), "text/csv"),
+        "current": ("current.csv", _csv(CLEAN), "text/csv"),
+    })
+    body = r.json()
+    assert len(body["dataset"]["baseline"]) == len(BASELINE)
+    assert len(body["dataset"]["current"]) == len(CLEAN)

@@ -101,7 +101,7 @@ POST /investigate/query
   return: { panel, routing: {panel, metric, reason}, ...same shape as above }
 POST /investigate/upload
   multipart: baseline=<csv>, current=<csv>, autopilot=<bool>, sum_metrics=<csv names>
-  same return shape
+  return: { panel, dataset: {baseline, current}, ...same shape as /investigate }
 POST /investigate/sql
   body: { "dsn": "<sqlalchemy url>", "baseline_query": "<single SELECT>",
           "current_query": "<single SELECT>", "autopilot": false, "sum_metrics": "" }
@@ -115,8 +115,18 @@ POST /investigate/sheets
 POST /investigate/series
   multipart: series=<csv with a 'period' column>, window=<int, optional>
   last period vs. a rolling baseline pooled over the prior `window` periods
+GET  /panels/{clean|diffuse|mixshift|deep}
+  return: { panel, baseline: [...rows], current: [...rows] }
+  the raw long-panel rows behind a built-in scenario — a live reference for
+  the shape /investigate/sql, /investigate/sheets and /investigate/upload expect
 GET  /health
 ```
+
+`upload`/`sql`/`sheets` echo the exact rows they fed the pipeline back as
+`dataset: {baseline, current}` — the demo page uses it (plus `/panels/{name}`
+for the built-in scenarios) to draw a baseline-vs-current chart per segment
+under the verdict, so you can see what's actually driving the numbers
+instead of just the aggregate gates.
 
 ## Using Qwen for real (not just mock mode)
 
@@ -224,6 +234,26 @@ no access beyond what that connection already has. The one guard it adds
 (`SELECT` or `WITH ... SELECT`, no `;`-separated second statement); it is a
 safety rail against accidents, not a substitute for connecting with a
 SELECT-only role or a reporting replica in a real deployment.
+
+**There is no import step.** The endpoint doesn't copy your data anywhere —
+it runs your query live and hands the result straight to the pipeline. That
+means the query's result columns *are* the panel: if your source table is
+at the raw-event grain (one row per user/transaction) rather than already
+aggregated per cell, the aggregation has to happen in the query itself, e.g.:
+
+```sql
+-- raw events table: (user_id, segment, device, converted, period)
+SELECT 'conversion' AS metric, segment, device,
+       COUNT(*)               AS n,
+       SUM(converted)         AS c
+FROM   events
+WHERE  period = 'this_month'
+GROUP BY segment, device
+```
+
+Not sure your query is shaped right? `GET /panels/clean` (or `diffuse` /
+`mixshift` / `deep`) returns the exact long-panel rows behind that built-in
+scenario — a live reference for the shape a query or sheet needs to produce.
 
 ### Live data: Google Sheets
 
