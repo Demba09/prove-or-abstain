@@ -155,6 +155,19 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/panels/{name}")
+def panel_data(name: Literal["clean", "diffuse", "mixshift", "deep"]) -> dict:
+    """The raw long-panel rows behind a built-in scenario — read-only,
+    for inspection. This is exactly the shape a SQL query or Google Sheet
+    must produce to be usable by /investigate/sql or /investigate/sheets:
+    one row per (metric, <dims...>) cell, with raw counts n/c, no rates."""
+    return _jsonable({
+        "panel": name,
+        "baseline": BASELINE.to_dict(orient="records"),
+        "current": _PANELS[name].to_dict(orient="records"),
+    })
+
+
 @app.post("/investigate")
 def investigate(req: InvestigateRequest) -> dict:
     result = _run_investigation(
@@ -183,6 +196,14 @@ def investigate_query(req: QueryRequest) -> dict:
         autopilot=req.autopilot,
     )
     return {"panel": routed["panel"], "routing": routed, **result}
+
+
+def _dataset_payload(base: pd.DataFrame, curr: pd.DataFrame) -> dict:
+    """Echo the exact rows fed into the pipeline — lets the UI draw a
+    baseline-vs-current chart for a data source it can't otherwise inspect
+    (a SQL/Sheets result, or a just-uploaded CSV file object)."""
+    return _jsonable({"baseline": base.to_dict(orient="records"),
+                      "current": curr.to_dict(orient="records")})
 
 
 def _validate_panel(df: pd.DataFrame, name: str) -> pd.DataFrame:
@@ -237,7 +258,7 @@ def investigate_upload(baseline: UploadFile = File(...),
     result = _run_investigation(base, curr, metrics=metrics, dims=dims,
                                 autopilot=autopilot,
                                 metric_kinds=_parse_kinds(sum_metrics, metrics))
-    return {"panel": "upload", **result}
+    return {"panel": "upload", "dataset": _dataset_payload(base, curr), **result}
 
 
 @app.post("/investigate/sql")
@@ -266,7 +287,7 @@ def investigate_sql(req: SqlRequest) -> dict:
     result = _run_investigation(base, curr, metrics=metrics, dims=dims,
                                 autopilot=req.autopilot,
                                 metric_kinds=_parse_kinds(req.sum_metrics, metrics))
-    return {"panel": "sql", **result}
+    return {"panel": "sql", "dataset": _dataset_payload(base, curr), **result}
 
 
 @app.post("/investigate/sheets")
@@ -295,7 +316,7 @@ def investigate_sheets(req: SheetsRequest) -> dict:
     result = _run_investigation(base, curr, metrics=metrics, dims=dims,
                                 autopilot=req.autopilot,
                                 metric_kinds=_parse_kinds(req.sum_metrics, metrics))
-    return {"panel": "sheets", **result}
+    return {"panel": "sheets", "dataset": _dataset_payload(base, curr), **result}
 
 
 @app.post("/investigate/series")

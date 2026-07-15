@@ -144,6 +144,33 @@ button:disabled { opacity: .5; cursor: wait; }
 .verdict-meta b { color: var(--ink); }
 .verdict-meta .num { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-variant-numeric: tabular-nums; }
 
+.dataset { margin: 18px 0; border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; background: var(--card); }
+.dataset-header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+.dataset-header h2 {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+  font-weight: 600; margin: 0;
+}
+.dataset-header h2 span { font-family: ui-monospace, "SF Mono", Consolas, monospace; color: var(--ink); text-transform: none; letter-spacing: 0; }
+.legend { display: flex; gap: 14px; font-size: 12px; color: var(--muted); }
+.legend .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+.legend .swatch.baseline { background: var(--panel-alt); border: 1px solid var(--muted); }
+.legend .swatch.current { background: var(--accent); }
+.dataset-chart { width: 100%; height: auto; overflow: visible; }
+.dataset-chart .bar-baseline { fill: var(--panel-alt); stroke: var(--muted); stroke-width: 1; }
+.dataset-chart .bar-current { fill: var(--accent); }
+.dataset-chart .axis-line { stroke: var(--line); stroke-width: 1; }
+.dataset-chart .axis-label { fill: var(--muted); font-size: 9.5px; font-family: ui-monospace, monospace; }
+.dataset-chart .seg-label { fill: var(--ink); font-size: 11px; }
+.dataset-chart .bar-group:hover .bar-baseline, .dataset-chart .bar-group:hover .bar-current { opacity: .85; }
+.dataset-table-wrap { margin-top: 10px; overflow-x: auto; }
+table.dataset-table {
+  width: 100%; border-collapse: collapse; font-size: 12.5px;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace; font-variant-numeric: tabular-nums;
+}
+table.dataset-table th, table.dataset-table td { text-align: right; padding: 5px 10px; border-bottom: 1px solid var(--line); }
+table.dataset-table th:first-child, table.dataset-table td:first-child { text-align: left; font-family: ui-sans-serif, sans-serif; }
+table.dataset-table thead th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: .03em; }
+
 .exhibits { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; margin: 18px 0; }
 .exhibit { border: 1px solid var(--line); border-radius: 8px; padding: 13px 15px; background: var(--card); }
 .exhibit.assert { border-left: 3px solid var(--assert); }
@@ -288,6 +315,23 @@ footer a { color: var(--accent-strong); }
     <div class="verdict-block">
       <span class="stamp" id="verdict"></span>
       <span class="verdict-meta" id="meta"></span>
+    </div>
+
+    <div class="dataset" id="datasetBlock" style="display:none;">
+      <div class="dataset-header">
+        <h2>dataset investigated — metric <span id="datasetMetric"></span></h2>
+        <div class="legend">
+          <span><span class="swatch baseline"></span>baseline</span>
+          <span><span class="swatch current"></span>current</span>
+        </div>
+      </div>
+      <svg id="datasetChart" class="dataset-chart" viewBox="0 0 560 200" role="img" aria-label="Baseline vs current rate per segment"></svg>
+      <details>
+        <summary>raw counts</summary>
+        <div class="dataset-table-wrap">
+          <table class="dataset-table" id="datasetTable"></table>
+        </div>
+      </details>
     </div>
 
     <div class="exhibits" id="exhibits"></div>
@@ -466,6 +510,119 @@ function render(b) {
   }
 
   $('trace').innerHTML = (b.trace || []).map(t => `<li>${t}</li>`).join('');
+
+  showDataset(b);
+}
+
+// -------------------------------------------------------------- dataset viz
+const BUILT_IN_PANELS = ['clean', 'diffuse', 'mixshift', 'deep'];
+
+function detectAnomalousMetric(baseRows, currRows) {
+  const metrics = [...new Set(baseRows.map(r => r.metric))];
+  let best = null;
+  for (const m of metrics) {
+    const b = baseRows.filter(r => r.metric === m), c = currRows.filter(r => r.metric === m);
+    const n0 = b.reduce((s, r) => s + r.n, 0), c0 = b.reduce((s, r) => s + r.c, 0);
+    const n1 = c.reduce((s, r) => s + r.n, 0), c1 = c.reduce((s, r) => s + r.c, 0);
+    const R0 = n0 ? c0 / n0 : 0, R1 = n1 ? c1 / n1 : 0;
+    const deltaRel = Math.abs(R1 - R0) / (Math.abs(R0) + 1e-12);
+    if (deltaRel >= 0.02 && (!best || deltaRel > best.deltaRel)) best = { metric: m, deltaRel };
+  }
+  return best ? best.metric : metrics[0];
+}
+
+function aggregateBySegment(rows, metric) {
+  const m = new Map();
+  for (const r of rows) {
+    if (r.metric !== metric || r.segment === undefined) continue;
+    const cur = m.get(r.segment) || { n: 0, c: 0 };
+    cur.n += r.n; cur.c += r.c;
+    m.set(r.segment, cur);
+  }
+  return m;
+}
+
+function buildRateRows(baseRows, currRows, metric) {
+  const baseAgg = aggregateBySegment(baseRows, metric), currAgg = aggregateBySegment(currRows, metric);
+  const segments = [...new Set([...baseAgg.keys(), ...currAgg.keys()])];
+  return segments.map(s => {
+    const b = baseAgg.get(s) || { n: 0, c: 0 }, c = currAgg.get(s) || { n: 0, c: 0 };
+    return { segment: s, n0: b.n, c0: b.c, r0: b.n ? b.c / b.n : 0, n1: c.n, c1: c.c, r1: c.n ? c.c / c.n : 0 };
+  });
+}
+
+function renderDatasetChart(rates) {
+  const W = 560, H = 200, padL = 42, padB = 26, padT = 10, padR = 10;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const maxRate = Math.max(0.001, ...rates.flatMap(r => [r.r0, r.r1])) * 1.25;
+  const groupW = plotW / rates.length;
+  const barW = Math.min(28, groupW * 0.3);
+  const gap = 4;
+  const yScale = v => padT + plotH - (v / maxRate) * plotH;
+  const baseline = yScale(0);
+
+  let svg = '';
+  [0, 0.5, 1].forEach(f => {
+    const y = yScale(maxRate * f);
+    svg += `<line class="axis-line" x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" />`;
+    svg += `<text class="axis-label" x="${padL - 6}" y="${y + 3}" text-anchor="end">${(maxRate * f * 100).toFixed(0)}%</text>`;
+  });
+
+  rates.forEach((r, i) => {
+    const cx = padL + i * groupW + groupW / 2;
+    const x0 = cx - barW - gap / 2, x1 = cx + gap / 2;
+    const y0 = yScale(r.r0), y1 = yScale(r.r1);
+    const title = `${r.segment} — baseline ${(r.r0 * 100).toFixed(1)}% (n=${r.n0}) &#183; current ${(r.r1 * 100).toFixed(1)}% (n=${r.n1})`;
+    svg += `<g class="bar-group"><title>${title}</title>
+      <rect class="bar-baseline" x="${x0}" y="${y0}" width="${barW}" height="${Math.max(0, baseline - y0)}" rx="3" />
+      <rect class="bar-current" x="${x1}" y="${y1}" width="${barW}" height="${Math.max(0, baseline - y1)}" rx="3" />
+      <text class="seg-label" x="${cx}" y="${H - 8}" text-anchor="middle">${r.segment}</text>
+    </g>`;
+  });
+  svg += `<line class="axis-line" x1="${padL}" y1="${baseline}" x2="${W - padR}" y2="${baseline}" />`;
+
+  const chart = $('datasetChart');
+  chart.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  chart.innerHTML = svg;
+}
+
+function renderDatasetTable(rates) {
+  const rows = rates.map(r => `<tr><td>${r.segment}</td>
+    <td>${r.n0}</td><td>${r.c0}</td><td>${(r.r0 * 100).toFixed(2)}%</td>
+    <td>${r.n1}</td><td>${r.c1}</td><td>${(r.r1 * 100).toFixed(2)}%</td>
+    <td>${((r.r1 - r.r0) * 100 >= 0 ? '+' : '')}${((r.r1 - r.r0) * 100).toFixed(2)}pp</td></tr>`).join('');
+  $('datasetTable').innerHTML =
+    `<thead><tr><th>segment</th><th>n&#8320;</th><th>c&#8320;</th><th>rate&#8320;</th>
+       <th>n&#8321;</th><th>c&#8321;</th><th>rate&#8321;</th><th>&#916;</th></tr></thead>
+     <tbody>${rows}</tbody>`;
+}
+
+async function showDataset(body) {
+  let baseRows, currRows;
+  if (body.dataset) {
+    ({ baseline: baseRows, current: currRows } = body.dataset);
+  } else if (BUILT_IN_PANELS.includes(body.panel)) {
+    try {
+      const r = await fetch(`/panels/${body.panel}`);
+      if (!r.ok) throw new Error();
+      ({ baseline: baseRows, current: currRows } = await r.json());
+    } catch {
+      $('datasetBlock').style.display = 'none';
+      return;
+    }
+  } else {
+    $('datasetBlock').style.display = 'none';
+    return;
+  }
+
+  const metric = detectAnomalousMetric(baseRows, currRows);
+  const rates = buildRateRows(baseRows, currRows, metric);
+  if (!rates.length) { $('datasetBlock').style.display = 'none'; return; }
+
+  $('datasetMetric').textContent = metric;
+  $('datasetBlock').style.display = 'block';
+  renderDatasetChart(rates);
+  renderDatasetTable(rates);
 }
 
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => runPanel(t.dataset.panel)));
