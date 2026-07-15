@@ -17,12 +17,12 @@ labelled speculation — it never computes and never decides a verdict.
 """
 from __future__ import annotations
 
-from attribution import decompose, decompose_sum
-from metrics import aggregate
-from gates import evaluate_gates, MATERIAL_REL
-from agent_state import AgentState, MetricAnomaly, Action
-from panels import metric_totals, project
-from llm import get_client, template_report
+from prove_or_abstain.attribution import decompose, decompose_sum
+from prove_or_abstain.metrics import aggregate
+from prove_or_abstain.gates import evaluate_gates, MATERIAL_REL
+from prove_or_abstain.agent_state import AgentState, MetricAnomaly, Action
+from prove_or_abstain.panels import metric_totals, project
+from prove_or_abstain.llm import get_client, template_report
 
 
 def _log(state: AgentState, msg: str) -> list[str]:

@@ -1,9 +1,9 @@
 """
-attribution_reference.py — reference ORACLE for Probatio.
+scripts/attribution_reference.py — reference ORACLE for Probatio.
 
 Purpose: an independently written, verified implementation of the
-rate/mix/interaction decomposition. The production version (attribution.py,
-identical signature) is diffed against this one in gate_check.py and in the
+rate/mix/interaction decomposition. The production version (prove_or_abstain/attribution.py,
+identical signature) is diffed against this one in scripts/gate_check.py and in the
 test suite. As long as the residual is not ~0 and the contributions do not
 match the oracle, the math layer is not trusted.
 

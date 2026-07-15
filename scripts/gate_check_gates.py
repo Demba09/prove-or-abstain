@@ -1,14 +1,20 @@
 """
-gate_check_gates.py — validates the decision layer (the gates).
+scripts/gate_check_gates.py — validates the decision layer (the gates).
 
   CLEAN    -> ASSERT  (one localized cause: paid breaks alone)
   DIFFUSE  -> ABSTAIN (uniform drop, no culprit)
   MIXSHIFT -> ABSTAIN (mix + rates both move, no clean culprit)
 """
+import sys
+from pathlib import Path
+
+# Runnable both as `python scripts/x.py` and `python -m scripts.x`:
+# put the repo root on sys.path so `prove_or_abstain` and `scripts` resolve.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pandas as pd
-from attribution_reference import BASELINE, CLEAN, DIFFUSE, aggregate
-from attribution import decompose
-from gates import evaluate_gates
+from scripts.attribution_reference import BASELINE, CLEAN, DIFFUSE, aggregate
+from prove_or_abstain.attribution import decompose
+from prove_or_abstain.gates import evaluate_gates
 
 MIXSHIFT = pd.DataFrame([
     {"segment": "organic",  "n": 14000, "c": 630},

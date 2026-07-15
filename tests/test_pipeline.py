@@ -18,11 +18,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.app import app
-from attribution import decompose
-from attribution_reference import (BASELINE as REF_BASELINE, CLEAN as REF_CLEAN,
+from prove_or_abstain.attribution import decompose
+from scripts.attribution_reference import (BASELINE as REF_BASELINE, CLEAN as REF_CLEAN,
                                    DIFFUSE as REF_DIFFUSE, decompose as oracle)
-from gates import evaluate_gates
-from metrics import aggregate
+from prove_or_abstain.gates import evaluate_gates
+from prove_or_abstain.metrics import aggregate
 
 # Same MIXSHIFT as gate_check.py: n AND r both move -> rate, mix, interaction
 # all non-zero.
@@ -116,7 +116,7 @@ def _csv(df: pd.DataFrame) -> bytes:
 
 
 def test_upload_roundtrip_matches_panels():
-    from panels import BASELINE, CLEAN, DIFFUSE
+    from prove_or_abstain.panels import BASELINE, CLEAN, DIFFUSE
     for curr, want in [(CLEAN, "ASSERT"), (DIFFUSE, "ABSTAIN")]:
         r = client.post("/investigate/upload", files={
             "baseline": ("baseline.csv", _csv(BASELINE), "text/csv"),
@@ -128,7 +128,7 @@ def test_upload_roundtrip_matches_panels():
 
 
 def test_upload_clean_localizes_paid():
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
     body = client.post("/investigate/upload", files={
         "baseline": ("baseline.csv", _csv(BASELINE), "text/csv"),
         "current": ("current.csv", _csv(CLEAN), "text/csv"),
@@ -137,7 +137,7 @@ def test_upload_clean_localizes_paid():
 
 
 def test_upload_rejects_missing_column():
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
     r = client.post("/investigate/upload", files={
         "baseline": ("baseline.csv", _csv(BASELINE.drop(columns=["n"])), "text/csv"),
         "current": ("current.csv", _csv(CLEAN), "text/csv"),
@@ -147,7 +147,7 @@ def test_upload_rejects_missing_column():
 
 
 def test_upload_rejects_negative_counts():
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
     bad = BASELINE.copy()
     bad.loc[0, "n"] = -5
     r = client.post("/investigate/upload", files={
@@ -159,7 +159,7 @@ def test_upload_rejects_negative_counts():
 
 
 def test_upload_rejects_missing_values():
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
     bad = BASELINE.copy()
     bad.loc[0, "c"] = np.nan
     r = client.post("/investigate/upload", files={
@@ -174,7 +174,7 @@ def test_upload_rejects_c_over_n_on_rate_metric():
     # c > n makes no sense for a rate (successes out of n); it must be a
     # 400, not a silent nonsense verdict. Sum metrics stay exempt —
     # test_sum_metric_upload_asserts covers that (revenue has c >> n).
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
     bad = CLEAN.copy()
     bad.loc[0, "c"] = bad.loc[0, "n"] + 1
     r = client.post("/investigate/upload", files={
@@ -186,7 +186,7 @@ def test_upload_rejects_c_over_n_on_rate_metric():
 
 
 def test_upload_rejects_mismatched_columns():
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
     r = client.post("/investigate/upload", files={
         "baseline": ("baseline.csv", _csv(BASELINE), "text/csv"),
         "current": ("current.csv", _csv(CLEAN.rename(columns={"device": "browser"})), "text/csv"),
@@ -218,7 +218,7 @@ def test_significance_gate_passes_on_clean():
 
 # --------------------------------------------------------------- sum metrics
 def test_decompose_sum_exact():
-    from attribution import decompose_sum
+    from prove_or_abstain.attribution import decompose_sum
     base = pd.DataFrame([{"segment": "a", "n": 100, "c": 2000},
                          {"segment": "b", "n": 50, "c": 2500}])
     curr = pd.DataFrame([{"segment": "a", "n": 120, "c": 1800},
@@ -266,7 +266,7 @@ def test_abstain_has_no_drilldown():
 
 # ----------------------------------------------------------------- time series
 def test_series_endpoint_rolling_baseline():
-    from panels import make_series
+    from prove_or_abstain.panels import make_series
     r = client.post("/investigate/series", files={
         "series": ("series.csv", _csv(make_series()), "text/csv"),
     })
@@ -277,7 +277,7 @@ def test_series_endpoint_rolling_baseline():
 
 
 def test_series_window_limits_baseline():
-    from panels import make_series
+    from prove_or_abstain.panels import make_series
     r = client.post("/investigate/series",
                     files={"series": ("series.csv", _csv(make_series()), "text/csv")},
                     data={"window": "3"})
@@ -285,7 +285,7 @@ def test_series_window_limits_baseline():
 
 
 def test_series_rejects_bad_window():
-    from panels import make_series
+    from prove_or_abstain.panels import make_series
     r = client.post("/investigate/series",
                     files={"series": ("series.csv", _csv(make_series()), "text/csv")},
                     data={"window": "0"})
@@ -294,7 +294,7 @@ def test_series_rejects_bad_window():
 
 
 def test_series_requires_period_column():
-    from panels import BASELINE
+    from prove_or_abstain.panels import BASELINE
     r = client.post("/investigate/series", files={
         "series": ("series.csv", _csv(BASELINE), "text/csv"),
     })
@@ -351,7 +351,7 @@ def _sqlite_dsn(tmp_path, tables: dict) -> str:
 
 
 def test_sql_connector_matches_upload(tmp_path):
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
     dsn = _sqlite_dsn(tmp_path, {"baseline": BASELINE, "current": CLEAN})
     body = client.post("/investigate/sql", json={
         "dsn": dsn,
@@ -365,7 +365,7 @@ def test_sql_connector_matches_upload(tmp_path):
 
 def test_sql_connector_with_where_clause(tmp_path):
     # queries can reshape/filter as long as the result stays long-panel
-    from panels import BASELINE, DIFFUSE
+    from prove_or_abstain.panels import BASELINE, DIFFUSE
     dsn = _sqlite_dsn(tmp_path, {"baseline": BASELINE, "current": DIFFUSE})
     body = client.post("/investigate/sql", json={
         "dsn": dsn,
@@ -395,7 +395,7 @@ def test_sql_connector_rejects_stacked_statements(tmp_path):
 
 # ----------------------------------------------------------- Google Sheets
 def test_gsheets_url_normalization():
-    from connectors.gsheets import _to_csv_url
+    from prove_or_abstain.connectors.gsheets import _to_csv_url
 
     edit = "https://docs.google.com/spreadsheets/d/ABC123/edit#gid=42"
     assert _to_csv_url(edit) == "https://docs.google.com/spreadsheets/d/ABC123/export?format=csv&gid=42"
@@ -408,13 +408,13 @@ def test_gsheets_url_normalization():
 
 
 def test_gsheets_rejects_non_google_host():
-    from connectors.gsheets import SheetError, _to_csv_url
+    from prove_or_abstain.connectors.gsheets import SheetError, _to_csv_url
     with pytest.raises(SheetError):
         _to_csv_url("https://evil.example.com/spreadsheets/d/ABC123/edit")
 
 
 def test_gsheets_fetch_panel_mocked(monkeypatch):
-    from connectors import gsheets
+    from prove_or_abstain.connectors import gsheets
 
     class FakeResp:
         text = "metric,segment,n,c\nconversion,paid,100,7\n"
@@ -427,7 +427,7 @@ def test_gsheets_fetch_panel_mocked(monkeypatch):
 
 
 def test_gsheets_fetch_panel_rejects_private_sheet(monkeypatch):
-    from connectors import gsheets
+    from prove_or_abstain.connectors import gsheets
 
     class FakeResp:
         text = "<html>sign in</html>"
@@ -439,7 +439,7 @@ def test_gsheets_fetch_panel_rejects_private_sheet(monkeypatch):
 
 
 def test_sheets_endpoint_matches_upload(monkeypatch):
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
 
     def fake_fetch(url):
         return BASELINE if "baseline" in url else CLEAN
@@ -464,7 +464,7 @@ def test_sheets_endpoint_rejects_non_google_url():
 
 # --------------------------------------------------------------- panel data
 def test_panel_data_matches_source():
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
     body = client.get("/panels/clean").json()
     assert body["panel"] == "clean"
     assert len(body["baseline"]) == len(BASELINE)
@@ -477,7 +477,7 @@ def test_panel_data_rejects_unknown_panel():
 
 
 def test_upload_response_echoes_dataset():
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
     r = client.post("/investigate/upload", files={
         "baseline": ("baseline.csv", _csv(BASELINE), "text/csv"),
         "current": ("current.csv", _csv(CLEAN), "text/csv"),

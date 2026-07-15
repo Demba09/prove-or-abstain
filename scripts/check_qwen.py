@@ -1,9 +1,15 @@
 """
-check_qwen.py — verifies that the DASHSCOPE key and the Qwen endpoint respond.
+scripts/check_qwen.py — verifies that the DASHSCOPE key and the Qwen endpoint respond.
 
-Run:  python check_qwen.py
+Run:  python scripts/check_qwen.py
 Prerequisites: pip install openai python-dotenv  +  DASHSCOPE_API_KEY set.
 """
+import sys
+from pathlib import Path
+
+# Runnable both as `python scripts/x.py` and `python -m scripts.x`:
+# put the repo root on sys.path so `prove_or_abstain` and `scripts` resolve.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import os
 
 try:
@@ -12,7 +18,7 @@ try:
 except ModuleNotFoundError:
     pass
 
-from llm import QwenClient
+from prove_or_abstain.llm import QwenClient
 
 key = os.environ.get("DASHSCOPE_API_KEY")
 if not key:

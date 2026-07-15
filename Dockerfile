@@ -12,7 +12,7 @@ COPY . .
 
 # Secrets are injected at runtime only:
 #   docker run -e DASHSCOPE_API_KEY=...   (or the Alibaba Cloud env panel)
-# Without a key, llm.py falls back to mock mode: the image also runs offline.
+# Without a key, prove_or_abstain/llm.py falls back to mock mode: the image also runs offline.
 
 EXPOSE 8000
 

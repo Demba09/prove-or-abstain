@@ -11,7 +11,7 @@ graph.invoke(state) and serialize the final AgentState (ASSERT/ABSTAIN
 verdict, per-dimension gates, root cause, drill-down, report, trace).
 No business logic lives here — everything is in the nodes.
 
-Expected CSV format (long panel, same columns as panels.py):
+Expected CSV format (long panel, same columns as prove_or_abstain/panels.py):
     metric, <dim1>, [<dim2>, ...], n, c
 Dimensions are inferred: every column except {metric, n, c, period}.
 
@@ -35,14 +35,14 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
-from autopilot import get_dashboard, record_check, resolve_execution, record_execution, get_executions
-from webhook import notify
-from connectors.gsheets import SheetError
-from connectors.gsheets import fetch_panel as fetch_sheet_panel
-from connectors.sql import SqlQueryError, fetch_panel as fetch_sql_panel
-from graph import APP as INVESTIGATION_GRAPH
-from llm import get_client
-from panels import BASELINE, CLEAN, DEEP, DIFFUSE, MIXSHIFT, split_series
+from prove_or_abstain.autopilot import get_dashboard, record_check, resolve_execution, record_execution, get_executions
+from prove_or_abstain.webhook import notify
+from prove_or_abstain.connectors.gsheets import SheetError
+from prove_or_abstain.connectors.gsheets import fetch_panel as fetch_sheet_panel
+from prove_or_abstain.connectors.sql import SqlQueryError, fetch_panel as fetch_sql_panel
+from prove_or_abstain.graph import APP as INVESTIGATION_GRAPH
+from prove_or_abstain.llm import get_client
+from prove_or_abstain.panels import BASELINE, CLEAN, DEEP, DIFFUSE, MIXSHIFT, split_series
 
 # docs_url=None frees /docs from the built-in Swagger route so the
 # redirect below can point it at ReDoc instead.

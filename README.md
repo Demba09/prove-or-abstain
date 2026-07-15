@@ -95,8 +95,8 @@ The agent is a LangGraph state machine with seven nodes and one conditional loop
 |------|------|
 | detector | compares each metric to its baseline, flags material moves |
 | hypothesizer | selects the next dimension to test |
-| investigator | decomposes the metric change along that dimension (`attribution.py`) |
-| verifier | checks the decomposition against the gates (`gates.py`) |
+| investigator | decomposes the metric change along that dimension (`prove_or_abstain/attribution.py`) |
+| verifier | checks the decomposition against the gates (`prove_or_abstain/gates.py`) |
 | driller | after an ASSERT, re-decomposes within the winning segment to refine the cause |
 | actuator | maps the verdict to a typed action: recommend, execute, or escalate |
 | reporter | writes the conclusion and keeps the full audit trail |
@@ -194,7 +194,7 @@ interaction = (w₁ − w₀)·(r₁ − r₀)
 contribution = rate + mix + interaction
 ```
 
-Zero residual. Validated against an independent oracle (`attribution_reference.py`).
+Zero residual. Validated against an independent oracle (`scripts/attribution_reference.py`).
 Sum metrics (`decompose_sum`) use the same algebra with raw counts instead of shares.
 
 ## Docker
@@ -247,7 +247,7 @@ With MCP, a Qwen agent:
 | **Human-in-the-loop checkpoints** | ABSTAIN always escalates; autopilot requires confidence ≥ 0.70 to execute |
 | **Production-ready, not toy demo** | Docker, CI, 46 tests, full audit trail, Swagger docs |
 
-**Qwen Cloud integration:** `llm.py` calls Qwen via DashScope for dimension ordering,
+**Qwen Cloud integration:** `prove_or_abstain/llm.py` calls Qwen via DashScope for dimension ordering,
 report phrasing, and query routing only. The math (pandas, numpy) and statistics
 (z-test, p ≤ 0.01) run independently. The verdict is **identical** with or without the LLM — 
 `QWEN_MOCK=1` proves this.

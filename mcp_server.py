@@ -30,9 +30,9 @@ except ImportError:
 # --- import the prove-or-abstain pipeline (same as the REST API) ---
 sys.path.insert(0, os.path.dirname(__file__))
 from api.app import _METRICS, _PANELS, _run_investigation
-from autopilot import get_dashboard as autopilot_dashboard, resolve_execution
-from llm import get_client
-from panels import BASELINE
+from prove_or_abstain.autopilot import get_dashboard as autopilot_dashboard, resolve_execution
+from prove_or_abstain.llm import get_client
+from prove_or_abstain.panels import BASELINE
 
 mcp = FastMCP(
     name="prove-or-abstain",
@@ -89,7 +89,7 @@ def investigate_sql(dsn: str, baseline_query: str, current_query: str) -> str:
 
     Returns verdict + decomposition gates + report as JSON.
     """
-    from connectors.sql import fetch_panel as sql_panel, SqlQueryError
+    from prove_or_abstain.connectors.sql import fetch_panel as sql_panel, SqlQueryError
     try:
         base = sql_panel(dsn, baseline_query)
         curr = sql_panel(dsn, current_query)
@@ -123,7 +123,7 @@ def autonomous_check() -> str:
         result["panel"] = panel_name
         results.append(result)
 
-    from autopilot import record_check
+    from prove_or_abstain.autopilot import record_check
     verdicts = [r["verdict"] for r in results]
     summary = "ASSERT_ACTED" if "ASSERT" in verdicts else "NO_ANOMALY"
     record_check(summary)

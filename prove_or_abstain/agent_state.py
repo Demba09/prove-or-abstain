@@ -15,7 +15,7 @@ from typing import Any, Optional, TypedDict
 
 import pandas as pd
 
-from gates import GateReport
+from prove_or_abstain.gates import GateReport
 
 
 @dataclass
