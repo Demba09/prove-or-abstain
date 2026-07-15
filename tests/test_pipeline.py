@@ -297,3 +297,57 @@ def test_query_never_picks_outside_panels():
     # crash or invent a name outside the supplied options.
     body = client.post("/investigate/query", json={"query": "asdkjhaskjdh"}).json()
     assert body["panel"] in {"clean", "diffuse", "mixshift", "deep"}
+
+
+# --------------------------------------------------------------- SQL connector
+def _sqlite_dsn(tmp_path, tables: dict) -> str:
+    from sqlalchemy import create_engine
+    dsn = f"sqlite:///{tmp_path / 'panel.db'}"
+    engine = create_engine(dsn)
+    for table, df in tables.items():
+        df.to_sql(table, engine, index=False, if_exists="replace")
+    engine.dispose()
+    return dsn
+
+
+def test_sql_connector_matches_upload(tmp_path):
+    from panels import BASELINE, CLEAN
+    dsn = _sqlite_dsn(tmp_path, {"baseline": BASELINE, "current": CLEAN})
+    body = client.post("/investigate/sql", json={
+        "dsn": dsn,
+        "baseline_query": "SELECT * FROM baseline",
+        "current_query": "SELECT * FROM current",
+    }).json()
+    assert body["panel"] == "sql"
+    assert body["verdict"] == "ASSERT"
+    assert body["root_cause"] == {"dimension": "segment", "segment": "paid"}
+
+
+def test_sql_connector_with_where_clause(tmp_path):
+    # queries can reshape/filter as long as the result stays long-panel
+    from panels import BASELINE, DIFFUSE
+    dsn = _sqlite_dsn(tmp_path, {"baseline": BASELINE, "current": DIFFUSE})
+    body = client.post("/investigate/sql", json={
+        "dsn": dsn,
+        "baseline_query": "SELECT * FROM baseline WHERE metric = 'conversion'",
+        "current_query": "SELECT * FROM current WHERE metric = 'conversion'",
+    }).json()
+    assert body["panel"] == "sql"
+    assert body["verdict"] == "ABSTAIN"
+
+
+def test_sql_connector_rejects_non_select(tmp_path):
+    dsn = _sqlite_dsn(tmp_path, {})
+    r = client.post("/investigate/sql", json={
+        "dsn": dsn, "baseline_query": "DROP TABLE sqlite_master", "current_query": "SELECT 1",
+    })
+    assert r.status_code == 400
+    assert "SELECT" in r.json()["detail"]
+
+
+def test_sql_connector_rejects_stacked_statements(tmp_path):
+    dsn = _sqlite_dsn(tmp_path, {})
+    r = client.post("/investigate/sql", json={
+        "dsn": dsn, "baseline_query": "SELECT 1; DROP TABLE sqlite_master", "current_query": "SELECT 1",
+    })
+    assert r.status_code == 400
