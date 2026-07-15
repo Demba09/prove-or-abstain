@@ -220,6 +220,10 @@ details.trace summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 
 footer { color: var(--muted); font-size: 12.5px; margin-top: 26px; line-height: 1.7; }
 footer a { color: var(--accent-strong); }
+.advanced { margin-top: 0; font-size: 14px; }
+.advanced > summary { cursor: pointer; color: var(--muted); user-select: none; padding: 4px 0; }
+.advanced > summary:hover { color: var(--accent-strong); }
+.advanced-body { padding: 0 0 4px; }
 </style>
 </head>
 <body>
@@ -261,52 +265,59 @@ footer a { color: var(--accent-strong); }
 
     <div class="divider"></div>
 
-    <p class="eyebrow">Or investigate your own data</p>
-    <div class="upload-row">
-      <div class="field">
-        <label class="field-label" for="baseline">Baseline CSV — columns: <code>metric, &lt;dimensions...&gt;, n, c</code></label>
-        <input type="file" id="baseline" accept=".csv">
-      </div>
-      <div class="field">
-        <label class="field-label" for="current">Current CSV — same columns (see <code>examples/</code>)</label>
-        <input type="file" id="current" accept=".csv">
-      </div>
-      <button class="secondary" type="button" id="uploadBtn">investigate CSV</button>
-    </div>
+    <details class="advanced" id="advancedToggle">
+      <summary>Advanced — bring your own data (CSV, SQL, Google Sheets)</summary>
+      <div class="advanced-body">
 
-    <div class="divider"></div>
+        <p class="eyebrow" style="margin-top:8px;">Upload CSVs</p>
+        <div class="upload-row">
+          <div class="field">
+            <label class="field-label" for="baseline">Baseline — columns: <code>metric, &lt;dimensions...&gt;, n, c</code></label>
+            <input type="file" id="baseline" accept=".csv">
+          </div>
+          <div class="field">
+            <label class="field-label" for="current">Current — same columns (see <code>examples/</code>)</label>
+            <input type="file" id="current" accept=".csv">
+          </div>
+          <button class="secondary" type="button" id="uploadBtn">investigate CSV</button>
+        </div>
 
-    <p class="eyebrow">Or query a live database</p>
-    <div class="field">
-      <label class="field-label" for="dsn">Connection string — your own credentials, read-only queries only</label>
-      <input type="text" id="dsn" placeholder="postgresql://user:pass@host/db or sqlite:///demo.db">
-    </div>
-    <div class="upload-row" style="margin-top:10px;">
-      <div class="field">
-        <label class="field-label" for="baselineQuery">Baseline query — a single SELECT, long-panel columns</label>
-        <textarea id="baselineQuery" rows="2" placeholder="SELECT metric, segment, device, n, c FROM conversions WHERE period = 'last_month'"></textarea>
-      </div>
-      <div class="field">
-        <label class="field-label" for="currentQuery">Current query — same shape</label>
-        <textarea id="currentQuery" rows="2" placeholder="SELECT metric, segment, device, n, c FROM conversions WHERE period = 'this_month'"></textarea>
-      </div>
-      <button class="secondary" type="button" id="sqlBtn">investigate SQL</button>
-    </div>
+        <div class="divider"></div>
 
-    <div class="divider"></div>
+        <p class="eyebrow">Query a live database</p>
+        <div class="field">
+          <label class="field-label" for="dsn">Connection string — your own credentials, read-only queries only</label>
+          <input type="text" id="dsn" placeholder="postgresql://user:pass@host/db or sqlite:///demo.db">
+        </div>
+        <div class="upload-row" style="margin-top:10px;">
+          <div class="field">
+            <label class="field-label" for="baselineQuery">Baseline query — a single SELECT, long-panel columns</label>
+            <textarea id="baselineQuery" rows="2" placeholder="SELECT metric, segment, device, n, c FROM conversions WHERE period = 'last_month'"></textarea>
+          </div>
+          <div class="field">
+            <label class="field-label" for="currentQuery">Current query — same shape</label>
+            <textarea id="currentQuery" rows="2" placeholder="SELECT metric, segment, device, n, c FROM conversions WHERE period = 'this_month'"></textarea>
+          </div>
+          <button class="secondary" type="button" id="sqlBtn">investigate SQL</button>
+        </div>
 
-    <p class="eyebrow">Or read from Google Sheets</p>
-    <div class="upload-row">
-      <div class="field">
-        <label class="field-label" for="baselineSheet">Baseline sheet URL — shared as "anyone with the link"</label>
-        <input type="text" id="baselineSheet" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0">
+        <div class="divider"></div>
+
+        <p class="eyebrow">Read from Google Sheets</p>
+        <div class="upload-row">
+          <div class="field">
+            <label class="field-label" for="baselineSheet">Baseline sheet URL — shared as "anyone with the link"</label>
+            <input type="text" id="baselineSheet" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0">
+          </div>
+          <div class="field">
+            <label class="field-label" for="currentSheet">Current sheet URL — same long-panel columns</label>
+            <input type="text" id="currentSheet" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0">
+          </div>
+          <button class="secondary" type="button" id="sheetsBtn">investigate sheets</button>
+        </div>
+
       </div>
-      <div class="field">
-        <label class="field-label" for="currentSheet">Current sheet URL — same long-panel columns</label>
-        <input type="text" id="currentSheet" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0">
-      </div>
-      <button class="secondary" type="button" id="sheetsBtn">investigate sheets</button>
-    </div>
+    </details>
 
     <p id="error" role="alert"></p>
   </div>
