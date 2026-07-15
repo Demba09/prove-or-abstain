@@ -30,7 +30,7 @@ import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
 load_dotenv()
@@ -44,7 +44,9 @@ from graph import APP as INVESTIGATION_GRAPH
 from llm import get_client
 from panels import BASELINE, CLEAN, DEEP, DIFFUSE, MIXSHIFT, split_series
 
-app = FastAPI(title="prove-or-abstain", version="0.4.0")
+# docs_url=None frees /docs from the built-in Swagger route so the
+# redirect below can point it at ReDoc instead.
+app = FastAPI(title="prove-or-abstain", version="0.4.0", docs_url=None)
 
 # The four demo panels: CLEAN/DEEP -> ASSERT, DIFFUSE/MIXSHIFT -> ABSTAIN.
 _PANELS = {"clean": CLEAN, "diffuse": DIFFUSE, "mixshift": MIXSHIFT, "deep": DEEP}
@@ -168,6 +170,11 @@ def home() -> FileResponse:
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/docs", include_in_schema=False)
+def docs() -> RedirectResponse:
+    return RedirectResponse(url="/redoc")
 
 
 # The built-in panels never change: serialize them once at import instead
