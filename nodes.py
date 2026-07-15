@@ -24,6 +24,8 @@ from agent_state import AgentState, MetricAnomaly, Action
 from panels import metric_totals, project
 from llm import get_client, template_report
 
+from autopilot import record_execution
+
 
 def _log(state: AgentState, msg: str) -> list[str]:
     return state.get("trace", []) + [msg]
@@ -228,6 +230,10 @@ def actuator(state: AgentState) -> dict:
         if conf >= 0.70 and autopilot:
             action = Action("EXECUTE", metric, dim, seg,
                             f"Autopilot: scoped action on {target} (conf {conf:.2f}).")
+            # Track 4 autopilot: record the execution for audit/dashboard
+            record_execution(metric, dim, seg, conf,
+                             action.kind, action.detail,
+                             state.get("report", ""), state.get("trace", []))
         else:
             why = "autopilot disabled" if conf >= 0.70 else f"confidence {conf:.2f} < 0.70"
             action = Action("RECOMMEND", metric, dim, seg,
