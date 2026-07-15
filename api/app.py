@@ -36,6 +36,7 @@ from pydantic import BaseModel
 load_dotenv()  # local: reads .env; in the container the file is absent
                # (.dockerignore) and runtime-injected variables win anyway.
 
+from connectors.sql import SqlQueryError, fetch_panel
 from graph import APP as INVESTIGATION_GRAPH
 from llm import get_client
 from panels import BASELINE, CLEAN, DEEP, DIFFUSE, MIXSHIFT, split_series
@@ -70,6 +71,14 @@ class InvestigateRequest(BaseModel):
 class QueryRequest(BaseModel):
     query: str                # free-text question, e.g. "why did conversion drop?"
     autopilot: bool = False
+
+
+class SqlRequest(BaseModel):
+    dsn: str                  # e.g. "postgresql://user:pass@host/db", "sqlite:///demo.db"
+    baseline_query: str       # a single SELECT/WITH, long-panel shape
+    current_query: str
+    autopilot: bool = False
+    sum_metrics: str = ""     # comma-separated SUM-kind metric names
 
 
 def _jsonable(v):
@@ -167,11 +176,9 @@ def investigate_query(req: QueryRequest) -> dict:
     return {"panel": routed["panel"], "routing": routed, **result}
 
 
-def _read_panel(upload: UploadFile, name: str) -> pd.DataFrame:
-    try:
-        df = pd.read_csv(io.BytesIO(upload.file.read()))
-    except Exception as exc:
-        raise HTTPException(400, f"{name}: not a readable CSV ({exc})")
+def _validate_panel(df: pd.DataFrame, name: str) -> pd.DataFrame:
+    """Long-panel contract shared by every data source (CSV, SQL, ...):
+    [metric, <dims...>, n, c], n/c numeric, at least one dimension column."""
     missing = _REQUIRED - set(df.columns)
     if missing:
         raise HTTPException(400, f"{name}: missing required column(s) {sorted(missing)}")
@@ -182,6 +189,14 @@ def _read_panel(upload: UploadFile, name: str) -> pd.DataFrame:
         raise HTTPException(400, f"{name}: needs at least one dimension column "
                                  f"besides {sorted(_REQUIRED)}")
     return df
+
+
+def _read_panel(upload: UploadFile, name: str) -> pd.DataFrame:
+    try:
+        df = pd.read_csv(io.BytesIO(upload.file.read()))
+    except Exception as exc:
+        raise HTTPException(400, f"{name}: not a readable CSV ({exc})")
+    return _validate_panel(df, name)
 
 
 def _parse_kinds(sum_metrics: str, metrics: list[str]) -> dict:
@@ -214,6 +229,35 @@ def investigate_upload(baseline: UploadFile = File(...),
                                 autopilot=autopilot,
                                 metric_kinds=_parse_kinds(sum_metrics, metrics))
     return {"panel": "upload", **result}
+
+
+@app.post("/investigate/sql")
+def investigate_sql(req: SqlRequest) -> dict:
+    """Pull baseline/current straight from a SQL database (connectors/sql.py)
+    instead of a CSV round trip: two read-only queries, each expected to
+    already project onto the long-panel shape [metric, <dims...>, n, c].
+    The caller supplies their own DSN/credentials — this endpoint adds no
+    access beyond what that connection already grants, and restricts each
+    query to a single SELECT statement."""
+    try:
+        base = fetch_panel(req.dsn, req.baseline_query)
+        curr = fetch_panel(req.dsn, req.current_query)
+    except SqlQueryError as exc:
+        raise HTTPException(400, str(exc))
+
+    base = _validate_panel(base, "baseline_query")
+    curr = _validate_panel(curr, "current_query")
+    if set(base.columns) != set(curr.columns):
+        raise HTTPException(400, "baseline_query and current_query must return the same columns")
+    if set(base["metric"].unique()) != set(curr["metric"].unique()):
+        raise HTTPException(400, "baseline_query and current_query must cover the same metrics")
+
+    dims = [c for c in base.columns if c not in _RESERVED]
+    metrics = sorted(base["metric"].unique())
+    result = _run_investigation(base, curr, metrics=metrics, dims=dims,
+                                autopilot=req.autopilot,
+                                metric_kinds=_parse_kinds(req.sum_metrics, metrics))
+    return {"panel": "sql", **result}
 
 
 @app.post("/investigate/series")

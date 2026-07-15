@@ -102,6 +102,11 @@ POST /investigate/query
 POST /investigate/upload
   multipart: baseline=<csv>, current=<csv>, autopilot=<bool>, sum_metrics=<csv names>
   same return shape
+POST /investigate/sql
+  body: { "dsn": "<sqlalchemy url>", "baseline_query": "<single SELECT>",
+          "current_query": "<single SELECT>", "autopilot": false, "sum_metrics": "" }
+  pulls both panels straight from a database (connectors/sql.py) instead of a
+  CSV round trip — same long-panel contract, see "Live data: the SQL connector" below
 POST /investigate/series
   multipart: series=<csv with a 'period' column>, window=<int, optional>
   last period vs. a rolling baseline pooled over the prior `window` periods
@@ -192,6 +197,29 @@ curl -X POST localhost:8000/investigate/series \
 Metrics named in `sum_metrics` are decomposed as sums (volume/rate split,
 e.g. revenue = customers × average basket) instead of rates.
 
+### Live data: the SQL connector
+
+`POST /investigate/sql` skips the CSV round trip: it runs two of your own
+queries directly against a database (Postgres, MySQL, SQLite — anything
+SQLAlchemy has a driver for) and feeds the result straight into the same
+pipeline, as long as each query already projects onto the long-panel shape
+(`metric, <dims...>, n, c`):
+
+```bash
+curl -X POST localhost:8000/investigate/sql -H 'content-type: application/json' -d '{
+  "dsn": "postgresql://user:pass@host/db",
+  "baseline_query": "SELECT metric, segment, device, n, c FROM conversions WHERE period = '\''last_month'\''",
+  "current_query":  "SELECT metric, segment, device, n, c FROM conversions WHERE period = '\''this_month'\''"
+}'
+```
+
+Trust model: you supply your own DSN and credentials — the endpoint grants
+no access beyond what that connection already has. The one guard it adds
+(`connectors/sql.py`) is scoping each call to a single read-only statement
+(`SELECT` or `WITH ... SELECT`, no `;`-separated second statement); it is a
+safety rail against accidents, not a substitute for connecting with a
+SELECT-only role or a reporting replica in a real deployment.
+
 ## Attribution math
 
 For a rate metric `R = Σ wₛ·rₛ` (segment weight × segment rate), the change
@@ -232,8 +260,8 @@ docker buildx build --platform linux/amd64 \
 
 ## Limitations
 
-- No live data connectors yet — data comes in as CSV uploads or the built-in
-  panels.
+- A SQL connector exists (`/investigate/sql`, Postgres/MySQL/SQLite); a
+  managed warehouse/Stripe/GA connector with OAuth is still out of scope.
 - The rolling baseline pools prior periods; there is no seasonality or trend
   modelling.
 - Drill-down goes one level deep (winning segment × one other dimension).

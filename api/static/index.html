@@ -106,7 +106,12 @@ input[type=text] {
 input[type=file] {
   font-size: 12.5px; width: 100%; padding: 6px 0; color: var(--muted);
 }
-input[type=text]::placeholder { color: var(--muted); }
+textarea {
+  width: 100%; font: 12.5px/1.5 ui-monospace, "SF Mono", Consolas, monospace;
+  padding: 9px 12px; border: 1px solid var(--line); border-radius: 7px;
+  background: var(--paper); color: var(--ink); resize: vertical;
+}
+input[type=text]::placeholder, textarea::placeholder { color: var(--muted); }
 button.primary, button.secondary {
   font: inherit; font-size: 13.5px; font-weight: 600; padding: 9px 18px; border-radius: 7px;
   cursor: pointer; white-space: nowrap;
@@ -242,6 +247,25 @@ footer a { color: var(--accent-strong); }
       <button class="secondary" type="button" id="uploadBtn">investigate CSV</button>
     </div>
 
+    <div class="divider"></div>
+
+    <p class="eyebrow">Or query a live database</p>
+    <div class="field">
+      <label class="field-label" for="dsn">Connection string — your own credentials, read-only queries only</label>
+      <input type="text" id="dsn" placeholder="postgresql://user:pass@host/db or sqlite:///demo.db">
+    </div>
+    <div class="upload-row" style="margin-top:10px;">
+      <div class="field">
+        <label class="field-label" for="baselineQuery">Baseline query — a single SELECT, long-panel columns</label>
+        <textarea id="baselineQuery" rows="2" placeholder="SELECT metric, segment, device, n, c FROM conversions WHERE period = 'last_month'"></textarea>
+      </div>
+      <div class="field">
+        <label class="field-label" for="currentQuery">Current query — same shape</label>
+        <textarea id="currentQuery" rows="2" placeholder="SELECT metric, segment, device, n, c FROM conversions WHERE period = 'this_month'"></textarea>
+      </div>
+      <button class="secondary" type="button" id="sqlBtn">investigate SQL</button>
+    </div>
+
     <p id="error" role="alert"></p>
   </div>
 
@@ -332,6 +356,22 @@ function runUpload() {
   call('/investigate/upload', {method: 'POST', body: fd});
 }
 
+function runSql() {
+  const dsn = $('dsn').value.trim();
+  const baselineQuery = $('baselineQuery').value.trim();
+  const currentQuery = $('currentQuery').value.trim();
+  if (!dsn || !baselineQuery || !currentQuery) {
+    return fail('Fill in the connection string and both queries.');
+  }
+  setActiveTab(null);
+  call('/investigate/sql', {
+    method: 'POST',
+    headers: {'content-type': 'application/json'},
+    body: JSON.stringify({dsn, baseline_query: baselineQuery, current_query: currentQuery,
+                          autopilot: $('autopilot').checked}),
+  });
+}
+
 function render(b) {
   $('result').style.display = 'block';
 
@@ -404,6 +444,7 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
 $('askBtn').addEventListener('click', runQuery);
 $('query').addEventListener('keydown', e => { if (e.key === 'Enter') runQuery(); });
 $('uploadBtn').addEventListener('click', runUpload);
+$('sqlBtn').addEventListener('click', runSql);
 </script>
 </body>
 </html>
