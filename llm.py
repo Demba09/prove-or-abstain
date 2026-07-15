@@ -33,6 +33,7 @@ check_qwen.py before a live demo to confirm which mode is actually active.
 from __future__ import annotations
 import json
 import os
+import re
 
 DEFAULT_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 DEFAULT_MODEL = "qwen-plus"
@@ -210,18 +211,22 @@ def template_report(p: dict) -> str:
             f"Likely a systemic cause. Action: {p['action_kind']}. {p['action_detail']}")
 
 
+def _words(text: str) -> set[str]:
+    return set(re.findall(r"[a-z][a-z'-]*", text.lower()))
+
+
 def template_route_query(query: str, panels: dict[str, str],
                          metrics: list[str]) -> dict:
     """Deterministic keyword routing (mock mode / fallback). Picks the
-    panel whose name or description best overlaps the query; defaults to
-    the first panel if nothing matches."""
-    q = query.lower()
+    panel whose name or description shares the most whole words with the
+    query; defaults to the first panel if nothing matches."""
+    q_words = _words(query)
     best_panel, best_score = next(iter(panels)), -1
     for name, desc in panels.items():
-        score = sum(1 for w in (name + " " + desc).lower().split() if w in q)
+        score = len(_words(name + " " + desc) & q_words)
         if score > best_score:
             best_panel, best_score = name, score
-    metric = next((m for m in metrics if m.lower() in q), None)
+    metric = next((m for m in metrics if m.lower() in q_words), None)
     return {"panel": best_panel, "metric": metric,
            "reason": "keyword match (mock/fallback routing, no LLM call)"}
 

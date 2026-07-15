@@ -155,17 +155,25 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+# The built-in panels never change: serialize them once at import instead
+# of a DataFrame -> records -> _jsonable pass on every request.
+_PANEL_PAYLOADS = {
+    name: _jsonable({
+        "panel": name,
+        "baseline": BASELINE.to_dict(orient="records"),
+        "current": df.to_dict(orient="records"),
+    })
+    for name, df in _PANELS.items()
+}
+
+
 @app.get("/panels/{name}")
 def panel_data(name: Literal["clean", "diffuse", "mixshift", "deep"]) -> dict:
     """The raw long-panel rows behind a built-in scenario — read-only,
     for inspection. This is exactly the shape a SQL query or Google Sheet
     must produce to be usable by /investigate/sql or /investigate/sheets:
     one row per (metric, <dims...>) cell, with raw counts n/c, no rates."""
-    return _jsonable({
-        "panel": name,
-        "baseline": BASELINE.to_dict(orient="records"),
-        "current": _PANELS[name].to_dict(orient="records"),
-    })
+    return _PANEL_PAYLOADS[name]
 
 
 @app.post("/investigate")
@@ -208,13 +216,18 @@ def _dataset_payload(base: pd.DataFrame, curr: pd.DataFrame) -> dict:
 
 def _validate_panel(df: pd.DataFrame, name: str) -> pd.DataFrame:
     """Long-panel contract shared by every data source (CSV, SQL, ...):
-    [metric, <dims...>, n, c], n/c numeric, at least one dimension column."""
+    [metric, <dims...>, n, c], n/c numeric, complete and non-negative,
+    at least one dimension column."""
     missing = _REQUIRED - set(df.columns)
     if missing:
         raise HTTPException(400, f"{name}: missing required column(s) {sorted(missing)}")
     for col in ("n", "c"):
         if not pd.api.types.is_numeric_dtype(df[col]):
             raise HTTPException(400, f"{name}: column '{col}' must be numeric")
+        if df[col].isna().any():
+            raise HTTPException(400, f"{name}: column '{col}' has missing values")
+        if (df[col] < 0).any():
+            raise HTTPException(400, f"{name}: column '{col}' has negative values")
     if not [c for c in df.columns if c not in _RESERVED]:
         raise HTTPException(400, f"{name}: needs at least one dimension column "
                                  f"besides {sorted(_REQUIRED)}")
@@ -240,6 +253,37 @@ def _parse_kinds(sum_metrics: str, metrics: list[str]) -> dict:
     return kinds
 
 
+def _validate_rate_counts(df: pd.DataFrame, name: str, kinds: dict) -> None:
+    """For rate metrics, c is a count of successes out of n — c > n is a
+    data error the z-test would silently turn into nonsense. Sum metrics
+    (revenue: c = total amount) are exempt."""
+    rate_rows = df[df["metric"].map(lambda m: kinds.get(m, "rate") == "rate")]
+    bad = int((rate_rows["c"] > rate_rows["n"]).sum())
+    if bad:
+        raise HTTPException(400, f"{name}: {bad} row(s) have c > n on a rate metric "
+                                 f"— declare sum-kind metrics via sum_metrics")
+
+
+def _investigate_pair(base: pd.DataFrame, curr: pd.DataFrame,
+                      base_name: str, curr_name: str,
+                      autopilot: bool, sum_metrics: str) -> dict:
+    """Shared tail of every bring-your-own-data endpoint (upload, SQL,
+    Sheets, series): cross-validate the two panels, infer dimensions and
+    metrics, and run the investigation."""
+    if set(base.columns) != set(curr.columns):
+        raise HTTPException(400, f"{base_name} and {curr_name} must have the same columns")
+    if set(base["metric"].unique()) != set(curr["metric"].unique()):
+        raise HTTPException(400, f"{base_name} and {curr_name} must cover the same metrics")
+
+    dims = [c for c in base.columns if c not in _RESERVED]
+    metrics = sorted(base["metric"].unique())
+    kinds = _parse_kinds(sum_metrics, metrics)
+    _validate_rate_counts(base, base_name, kinds)
+    _validate_rate_counts(curr, curr_name, kinds)
+    return _run_investigation(base, curr, metrics=metrics, dims=dims,
+                              autopilot=autopilot, metric_kinds=kinds)
+
+
 @app.post("/investigate/upload")
 def investigate_upload(baseline: UploadFile = File(...),
                        current: UploadFile = File(...),
@@ -247,17 +291,8 @@ def investigate_upload(baseline: UploadFile = File(...),
                        sum_metrics: str = Form("")) -> dict:
     base = _read_panel(baseline, "baseline")
     curr = _read_panel(current, "current")
-
-    if set(base.columns) != set(curr.columns):
-        raise HTTPException(400, "baseline and current must have the same columns")
-    if set(base["metric"].unique()) != set(curr["metric"].unique()):
-        raise HTTPException(400, "baseline and current must cover the same metrics")
-
-    dims = [c for c in base.columns if c not in _RESERVED]
-    metrics = sorted(base["metric"].unique())
-    result = _run_investigation(base, curr, metrics=metrics, dims=dims,
-                                autopilot=autopilot,
-                                metric_kinds=_parse_kinds(sum_metrics, metrics))
+    result = _investigate_pair(base, curr, "baseline", "current",
+                               autopilot, sum_metrics)
     return {"panel": "upload", "dataset": _dataset_payload(base, curr), **result}
 
 
@@ -277,16 +312,8 @@ def investigate_sql(req: SqlRequest) -> dict:
 
     base = _validate_panel(base, "baseline_query")
     curr = _validate_panel(curr, "current_query")
-    if set(base.columns) != set(curr.columns):
-        raise HTTPException(400, "baseline_query and current_query must return the same columns")
-    if set(base["metric"].unique()) != set(curr["metric"].unique()):
-        raise HTTPException(400, "baseline_query and current_query must cover the same metrics")
-
-    dims = [c for c in base.columns if c not in _RESERVED]
-    metrics = sorted(base["metric"].unique())
-    result = _run_investigation(base, curr, metrics=metrics, dims=dims,
-                                autopilot=req.autopilot,
-                                metric_kinds=_parse_kinds(req.sum_metrics, metrics))
+    result = _investigate_pair(base, curr, "baseline_query", "current_query",
+                               req.autopilot, req.sum_metrics)
     return {"panel": "sql", "dataset": _dataset_payload(base, curr), **result}
 
 
@@ -306,16 +333,8 @@ def investigate_sheets(req: SheetsRequest) -> dict:
 
     base = _validate_panel(base, "baseline_url")
     curr = _validate_panel(curr, "current_url")
-    if set(base.columns) != set(curr.columns):
-        raise HTTPException(400, "baseline_url and current_url must have the same columns")
-    if set(base["metric"].unique()) != set(curr["metric"].unique()):
-        raise HTTPException(400, "baseline_url and current_url must cover the same metrics")
-
-    dims = [c for c in base.columns if c not in _RESERVED]
-    metrics = sorted(base["metric"].unique())
-    result = _run_investigation(base, curr, metrics=metrics, dims=dims,
-                                autopilot=req.autopilot,
-                                metric_kinds=_parse_kinds(req.sum_metrics, metrics))
+    result = _investigate_pair(base, curr, "baseline_url", "current_url",
+                               req.autopilot, req.sum_metrics)
     return {"panel": "sheets", "dataset": _dataset_payload(base, curr), **result}
 
 
@@ -336,9 +355,6 @@ def investigate_series(series: UploadFile = File(...),
     except ValueError as exc:
         raise HTTPException(400, f"series: {exc}")
 
-    dims = [c for c in base.columns if c not in _RESERVED]
-    metrics = sorted(base["metric"].unique())
-    result = _run_investigation(base, curr, metrics=metrics, dims=dims,
-                                autopilot=autopilot,
-                                metric_kinds=_parse_kinds(sum_metrics, metrics))
+    result = _investigate_pair(base, curr, "series baseline", "series current",
+                               autopilot, sum_metrics)
     return {"panel": "series", **result}
