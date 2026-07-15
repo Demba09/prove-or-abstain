@@ -5,131 +5,289 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>prove-or-abstain</title>
 <style>
+:root {
+  --accent: #2E6F8E;
+  --accent-strong: #1F5471;
+  --assert: #2F7A50;
+  --assert-bg: #EAF3EC;
+  --abstain: #A6472E;
+  --abstain-bg: #F5EAE6;
+  --ink: #131A20;
+  --muted: #5B6670;
+  --line: #D9DEE1;
+  --paper: #F4F6F7;
+  --card: #FFFFFF;
+  --panel-alt: #EBEEEF;
+  --focus: #2E6F8E;
+}
+@media (prefers-color-scheme: dark) {
   :root {
-    --bg: #f8fafc; --card: #ffffff; --ink: #0f172a; --muted: #64748b;
-    --line: #e2e8f0; --indigo: #4f46e5; --green: #16a34a; --green-bg: #f0fdf4;
-    --red: #dc2626; --red-bg: #fef2f2; --amber: #b45309; --amber-bg: #fffbeb;
+    --accent: #5FA8C7; --accent-strong: #86C2DC;
+    --assert: #5FBE85; --assert-bg: #14231A;
+    --abstain: #E0825F; --abstain-bg: #271914;
+    --ink: #E7EBEC; --muted: #8B98A3; --line: #2A3339;
+    --paper: #0E1418; --card: #161D22; --panel-alt: #1B2329; --focus: #86C2DC;
   }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font: 15px/1.55 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
-  }
-  main { max-width: 880px; margin: 0 auto; padding: 32px 20px 64px; }
-  h1 { font-size: 26px; margin: 0 0 4px; }
-  .sub { color: var(--muted); margin: 0 0 28px; }
-  .card {
-    background: var(--card); border: 1px solid var(--line);
-    border-radius: 10px; padding: 20px; margin-bottom: 20px;
-  }
-  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-  button {
-    font: inherit; padding: 8px 18px; border-radius: 8px; cursor: pointer;
-    border: 1px solid var(--indigo); background: var(--indigo); color: #fff;
-  }
-  button.secondary { background: #fff; color: var(--indigo); }
-  button:disabled { opacity: .5; cursor: wait; }
-  label.toggle { display: inline-flex; gap: 6px; align-items: center; color: var(--muted); margin-left: auto; }
-  .divider { border-top: 1px solid var(--line); margin: 18px 0 14px; }
-  .hint { color: var(--muted); font-size: 13px; margin: 6px 0 10px; }
-  input[type=file] { font-size: 13px; max-width: 260px; }
-  #error { color: var(--red); margin: 8px 0 0; white-space: pre-wrap; display: none; }
+}
+:root[data-theme="dark"] {
+  --accent: #5FA8C7; --accent-strong: #86C2DC;
+  --assert: #5FBE85; --assert-bg: #14231A;
+  --abstain: #E0825F; --abstain-bg: #271914;
+  --ink: #E7EBEC; --muted: #8B98A3; --line: #2A3339;
+  --paper: #0E1418; --card: #161D22; --panel-alt: #1B2329; --focus: #86C2DC;
+}
+:root[data-theme="light"] {
+  --accent: #2E6F8E; --accent-strong: #1F5471;
+  --assert: #2F7A50; --assert-bg: #EAF3EC;
+  --abstain: #A6472E; --abstain-bg: #F5EAE6;
+  --ink: #131A20; --muted: #5B6670; --line: #D9DEE1;
+  --paper: #F4F6F7; --card: #FFFFFF; --panel-alt: #EBEEEF; --focus: #2E6F8E;
+}
 
-  #result { display: none; }
-  .verdict-row { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
-  .badge { font-size: 22px; font-weight: 700; padding: 6px 18px; border-radius: 8px; }
-  .badge.assert { color: var(--green); background: var(--green-bg); border: 1.5px solid var(--green); }
-  .badge.abstain { color: var(--red); background: var(--red-bg); border: 1.5px solid var(--red); }
-  .badge.none { color: var(--muted); background: var(--bg); border: 1.5px solid var(--line); }
-  .meta { color: var(--muted); }
-  .meta b { color: var(--ink); }
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+main { max-width: 940px; margin: 0 auto; padding: 28px 20px 72px; }
 
-  .gates { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 14px 0; }
-  .gate { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
-  .gate h3 { margin: 0 0 6px; font-size: 14px; display: flex; justify-content: space-between; }
-  .gate .v { font-weight: 700; }
-  .gate.assert { border-color: var(--green); background: var(--green-bg); }
-  .gate.assert .v { color: var(--green); }
-  .gate.abstain { border-color: var(--red); background: var(--red-bg); }
-  .gate.abstain .v { color: var(--red); }
-  .gate ul { margin: 4px 0 0; padding-left: 18px; color: var(--muted); font-size: 13px; }
-  .gate .nums { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+a { color: var(--accent-strong); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
 
-  .action { border-left: 3px solid var(--amber); background: var(--amber-bg); padding: 10px 14px; border-radius: 0 8px 8px 0; margin: 14px 0; }
-  .action b { color: var(--amber); }
-  .drill { color: var(--ink); margin: 4px 0 14px; }
-  .drill b { color: var(--indigo); }
-  .spec { border: 1px dashed var(--line); border-radius: 8px; padding: 10px 14px; margin: 14px 0; }
-  .spec .tag { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-  .spec ul { margin: 6px 0 0; padding-left: 18px; color: var(--muted); font-size: 13.5px; }
-  .report { font-style: italic; color: var(--ink); margin: 14px 0; }
-  details { margin-top: 14px; }
-  summary { cursor: pointer; color: var(--muted); }
-  .trace { font: 12.5px/1.6 ui-monospace, Menlo, monospace; color: var(--muted); margin: 8px 0 0; padding-left: 18px; }
-  footer { color: var(--muted); font-size: 13px; margin-top: 28px; }
-  footer a { color: var(--indigo); }
+header.top { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 4px; }
+h1 { font-size: 21px; font-weight: 700; letter-spacing: -0.01em; margin: 0; }
+p.sub { color: var(--muted); margin: 6px 0 22px; max-width: 62ch; }
+
+.panel {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 18px 20px; margin-bottom: 20px;
+}
+.eyebrow { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0 0 10px; }
+
+fieldset { border: 0; margin: 0; padding: 0; }
+legend { padding: 0; margin: 0 0 10px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+
+.scenarios { display: flex; gap: 8px; flex-wrap: wrap; }
+.tab {
+  font: inherit; font-size: 13.5px; padding: 8px 14px; border-radius: 7px;
+  border: 1px solid var(--line); background: var(--paper); color: var(--ink);
+  cursor: pointer; text-align: left;
+}
+.tab:hover { border-color: var(--accent); }
+.tab[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: #fff; }
+.tab .name { font-weight: 600; display: block; }
+.tab .hint { display: block; font-size: 11.5px; color: inherit; opacity: .8; margin-top: 1px; }
+.tab[aria-pressed="true"] .hint { opacity: .9; }
+
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
+.switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--muted); cursor: pointer; user-select: none; }
+.switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.switch .track { width: 34px; height: 19px; border-radius: 999px; background: var(--line); position: relative; transition: background .15s; }
+.switch .track::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px;
+  border-radius: 50%; background: var(--card); transition: transform .15s;
+}
+.switch input:checked + .track { background: var(--accent); }
+.switch input:checked + .track::after { transform: translateX(15px); }
+.switch input:focus-visible + .track { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.divider { border-top: 1px solid var(--line); margin: 16px 0; }
+label.field-label { display: block; font-size: 12.5px; color: var(--muted); margin: 0 0 6px; }
+
+.query-row, .upload-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
+.field { flex: 1; min-width: 200px; }
+input[type=text] {
+  width: 100%; font: inherit; font-size: 13.5px; padding: 9px 12px;
+  border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--ink);
+}
+input[type=file] {
+  font-size: 12.5px; width: 100%; padding: 6px 0; color: var(--muted);
+}
+input[type=text]::placeholder { color: var(--muted); }
+button.primary, button.secondary {
+  font: inherit; font-size: 13.5px; font-weight: 600; padding: 9px 18px; border-radius: 7px;
+  cursor: pointer; white-space: nowrap;
+}
+button.primary { border: 1px solid var(--accent); background: var(--accent); color: #fff; }
+button.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+button.secondary { border: 1px solid var(--line); background: var(--card); color: var(--accent-strong); }
+button.secondary:hover { border-color: var(--accent); }
+button:disabled { opacity: .5; cursor: wait; }
+.routing-note { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
+.routing-note b { color: var(--ink); }
+
+#error {
+  color: var(--abstain); background: var(--abstain-bg); border: 1px solid var(--abstain);
+  border-radius: 7px; padding: 10px 12px; margin-top: 12px; font-size: 13.5px; display: none;
+}
+
+#result { display: none; }
+
+.verdict-block { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-bottom: 4px; }
+.stamp {
+  font-weight: 800; font-size: 22px; letter-spacing: .08em; text-transform: uppercase;
+  padding: 8px 20px; border-radius: 6px; transform: rotate(-2deg);
+  border: 3px double currentColor; display: inline-block; line-height: 1.1;
+}
+.stamp.assert { color: var(--assert); background: var(--assert-bg); }
+.stamp.abstain { color: var(--abstain); background: var(--abstain-bg); }
+.stamp.none { color: var(--muted); background: var(--panel-alt); border-style: solid; }
+.verdict-meta { color: var(--muted); font-size: 13.5px; }
+.verdict-meta b { color: var(--ink); }
+.verdict-meta .num { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-variant-numeric: tabular-nums; }
+
+.exhibits { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 12px; margin: 18px 0; }
+.exhibit { border: 1px solid var(--line); border-radius: 8px; padding: 13px 15px; background: var(--card); }
+.exhibit.assert { border-left: 3px solid var(--assert); }
+.exhibit.abstain { border-left: 3px solid var(--abstain); }
+.exhibit h3 { margin: 0 0 8px; font-size: 13px; display: flex; justify-content: space-between; align-items: baseline; }
+.exhibit h3 .dim { text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; font-size: 11px; }
+.chip { font-size: 11px; font-weight: 700; letter-spacing: .03em; padding: 2px 8px; border-radius: 999px; }
+.chip.assert { color: var(--assert); background: var(--assert-bg); }
+.chip.abstain { color: var(--abstain); background: var(--abstain-bg); }
+.exhibit ul { margin: 6px 0 8px; padding-left: 16px; color: var(--muted); font-size: 12.5px; }
+.exhibit .data-row {
+  font-size: 12px; color: var(--muted); display: flex; gap: 10px; flex-wrap: wrap;
+  font-family: ui-monospace, "SF Mono", Consolas, monospace; font-variant-numeric: tabular-nums;
+}
+.exhibit .data-row span { color: var(--ink); }
+
+.drilldown {
+  border: 1px dashed var(--line); border-radius: 8px; padding: 10px 14px;
+  margin: 14px 0; font-size: 13.5px; color: var(--muted);
+}
+.drilldown b { color: var(--accent-strong); }
+
+.action { border-radius: 8px; padding: 12px 14px; margin: 14px 0; font-size: 13.5px; background: var(--panel-alt); }
+.action .kind { font-weight: 700; letter-spacing: .03em; font-size: 11px; text-transform: uppercase; color: var(--accent-strong); margin-right: 8px; }
+
+.report {
+  font-size: 15px; line-height: 1.65; margin: 16px 0; padding: 14px 16px;
+  border-left: 3px solid var(--accent); background: var(--panel-alt); border-radius: 0 8px 8px 0;
+}
+.report .llm-tag {
+  display: block; margin-top: 8px; font-size: 11.5px; color: var(--muted);
+  font-family: ui-monospace, "SF Mono", Consolas, monospace;
+}
+
+.spec { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 14px 0; }
+.spec .tag { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.spec ul { margin: 8px 0 0; padding-left: 18px; font-size: 13.5px; color: var(--ink); }
+
+details.trace { margin-top: 16px; }
+details.trace summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.trace-log {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; line-height: 1.7;
+  background: var(--panel-alt); border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px 14px; margin: 8px 0 0; overflow-x: auto; color: var(--muted); list-style: none;
+}
+.trace-log li::before { content: "› "; color: var(--accent); }
+
+footer { color: var(--muted); font-size: 12.5px; margin-top: 26px; line-height: 1.7; }
+footer a { color: var(--accent-strong); }
 </style>
 </head>
 <body>
 <main>
-  <h1>prove-or-abstain</h1>
+  <header class="top">
+    <h1>prove&#8209;or&#8209;abstain</h1>
+  </header>
   <p class="sub">A causal investigation agent that asserts a root cause only when the math proves it — and abstains otherwise.</p>
 
-  <div class="card">
+  <div class="panel">
+    <fieldset>
+      <legend>Built-in scenarios</legend>
+      <div class="scenarios" id="scenarios" role="group" aria-label="Demo scenario">
+        <button class="tab" type="button" data-panel="clean" aria-pressed="false"><span class="name">clean</span><span class="hint">one segment collapses &rarr; ASSERT</span></button>
+        <button class="tab" type="button" data-panel="diffuse" aria-pressed="false"><span class="name">diffuse</span><span class="hint">uniform drop &rarr; ABSTAIN</span></button>
+        <button class="tab" type="button" data-panel="mixshift" aria-pressed="false"><span class="name">mixshift</span><span class="hint">mix and rates entangled &rarr; ABSTAIN</span></button>
+        <button class="tab" type="button" data-panel="deep" aria-pressed="false"><span class="name">deep</span><span class="hint">one cell collapses &rarr; ASSERT, then drills down</span></button>
+      </div>
+    </fieldset>
     <div class="row">
-      <button onclick="runPanel('clean')">clean</button>
-      <button onclick="runPanel('diffuse')">diffuse</button>
-      <button onclick="runPanel('mixshift')">mixshift</button>
-      <button onclick="runPanel('deep')">deep</button>
-      <label class="toggle"><input type="checkbox" id="autopilot"> autopilot</label>
+      <label class="switch">
+        <input type="checkbox" id="autopilot">
+        <span class="track"></span>
+        autopilot (execute at confidence &ge; 0.70)
+      </label>
     </div>
-    <p class="hint">clean: one segment collapses &rarr; ASSERT &nbsp;·&nbsp; diffuse: uniform drop &rarr; ABSTAIN &nbsp;·&nbsp; mixshift: mix and rates entangled &rarr; ABSTAIN &nbsp;·&nbsp; deep: one cell collapses &rarr; ASSERT, then drills down</p>
+
     <div class="divider"></div>
-    <p class="hint">Or ask in plain English — Qwen picks which panel to investigate (never computes anything itself):</p>
-    <div class="row">
-      <input type="text" id="query" placeholder="why did conversion drop uniformly last week?" style="flex:1; min-width:240px; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font:inherit;">
-      <button class="secondary" onclick="runQuery()">ask</button>
+
+    <p class="eyebrow">Ask in plain English</p>
+    <div class="query-row">
+      <div class="field">
+        <label class="field-label" for="query">Qwen picks which panel to investigate — it never computes anything itself</label>
+        <input type="text" id="query" placeholder="why did conversion drop uniformly last week?">
+      </div>
+      <button class="secondary" type="button" id="askBtn">ask</button>
     </div>
-    <p id="routing" class="hint" style="display:none;"></p>
+    <p class="routing-note" id="routing" style="display:none;"></p>
+
     <div class="divider"></div>
-    <p class="hint">Or investigate your own data — two CSVs with columns <code>metric, &lt;dimensions...&gt;, n, c</code> (see <code>examples/</code>):</p>
-    <div class="row">
-      <input type="file" id="baseline" accept=".csv"> <span class="hint">baseline</span>
-      <input type="file" id="current" accept=".csv"> <span class="hint">current</span>
-      <button class="secondary" onclick="runUpload()">investigate CSV</button>
+
+    <p class="eyebrow">Or investigate your own data</p>
+    <div class="upload-row">
+      <div class="field">
+        <label class="field-label" for="baseline">Baseline CSV — columns: <code>metric, &lt;dimensions...&gt;, n, c</code></label>
+        <input type="file" id="baseline" accept=".csv">
+      </div>
+      <div class="field">
+        <label class="field-label" for="current">Current CSV — same columns (see <code>examples/</code>)</label>
+        <input type="file" id="current" accept=".csv">
+      </div>
+      <button class="secondary" type="button" id="uploadBtn">investigate CSV</button>
     </div>
-    <p id="error"></p>
+
+    <p id="error" role="alert"></p>
   </div>
 
-  <div class="card" id="result">
-    <div class="verdict-row">
-      <span class="badge" id="verdict"></span>
-      <span class="meta" id="confidence"></span>
-      <span class="meta" id="rootcause"></span>
+  <div class="panel" id="result" aria-live="polite">
+    <div class="verdict-block">
+      <span class="stamp" id="verdict"></span>
+      <span class="verdict-meta" id="meta"></span>
     </div>
-    <div class="gates" id="gates"></div>
-    <p class="drill" id="drill"></p>
-    <div class="action" id="action"></div>
-    <p class="report" id="report"></p>
-    <div class="spec" id="spec"></div>
-    <details><summary>investigation trace</summary><ol class="trace" id="trace"></ol></details>
+
+    <div class="exhibits" id="exhibits"></div>
+
+    <div class="drilldown" id="drilldown" style="display:none;"></div>
+
+    <div class="action" id="action" style="display:none;"></div>
+
+    <div class="report" id="report" style="display:none;"></div>
+
+    <div class="spec" id="spec" style="display:none;"></div>
+
+    <details class="trace">
+      <summary>investigation trace</summary>
+      <ol class="trace-log" id="trace"></ol>
+    </details>
   </div>
 
   <footer>
-    Every number comes from pandas/numpy; the LLM only orders the dimensions to try and phrases the report.
-    <a href="/docs">API docs</a>
+    Every number comes from pandas/numpy; the LLM only orders the dimensions to try, routes free-text
+    questions to a panel, and phrases the report. <a href="/docs">API docs</a>
   </footer>
 </main>
 
 <script>
 const $ = id => document.getElementById(id);
+let activePanel = null;
 
 function setBusy(b) { document.querySelectorAll('button').forEach(x => x.disabled = b); }
-
 function fail(msg) { $('error').style.display = 'block'; $('error').textContent = msg; }
+function clearFail() { $('error').style.display = 'none'; }
+
+function setActiveTab(panel) {
+  activePanel = panel;
+  document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-pressed', String(t.dataset.panel === panel)));
+}
 
 async function call(url, opts) {
-  $('error').style.display = 'none';
+  clearFail();
   setBusy(true);
   try {
     const r = await fetch(url, opts);
@@ -144,6 +302,7 @@ async function call(url, opts) {
 }
 
 function runPanel(panel) {
+  setActiveTab(panel);
   call('/investigate', {
     method: 'POST',
     headers: {'content-type': 'application/json'},
@@ -165,6 +324,7 @@ function runQuery() {
 function runUpload() {
   const base = $('baseline').files[0], curr = $('current').files[0];
   if (!base || !curr) return fail('Select both a baseline CSV and a current CSV.');
+  setActiveTab(null);
   const fd = new FormData();
   fd.append('baseline', base);
   fd.append('current', curr);
@@ -176,6 +336,7 @@ function render(b) {
   $('result').style.display = 'block';
 
   if (b.routing) {
+    setActiveTab(b.panel);
     $('routing').style.display = 'block';
     $('routing').innerHTML = `routed to panel <b>${b.panel}</b>` +
       (b.routing.metric ? ` · metric <b>${b.routing.metric}</b>` : '') +
@@ -185,41 +346,48 @@ function render(b) {
   }
 
   const v = b.verdict || 'NO_ANOMALY';
-  $('verdict').textContent = v;
-  $('verdict').className = 'badge ' + (v === 'ASSERT' ? 'assert' : v === 'ABSTAIN' ? 'abstain' : 'none');
-  $('confidence').innerHTML = b.confidence != null ? `confidence <b>${b.confidence.toFixed(2)}</b>` : '';
-  $('rootcause').innerHTML = b.root_cause
-    ? `root cause <b>${b.root_cause.dimension} = ${b.root_cause.segment}</b>`
-    : (v === 'ABSTAIN' ? 'no localized cause' : '');
+  const stamp = $('verdict');
+  stamp.textContent = v;
+  stamp.className = 'stamp ' + (v === 'ASSERT' ? 'assert' : v === 'ABSTAIN' ? 'abstain' : 'none');
 
-  const gates = $('gates');
-  gates.innerHTML = '';
+  const metaParts = [];
+  if (b.confidence != null) metaParts.push(`confidence <span class="num">${b.confidence.toFixed(2)}</span>`);
+  if (b.root_cause) metaParts.push(`root cause <b>${b.root_cause.dimension} = ${b.root_cause.segment}</b>`);
+  else if (v === 'ABSTAIN') metaParts.push('no localized cause');
+  $('meta').innerHTML = metaParts.join(' &nbsp;·&nbsp; ');
+
+  const exhibits = $('exhibits');
+  exhibits.innerHTML = '';
   for (const [dim, g] of Object.entries(b.gates || {})) {
     const el = document.createElement('div');
-    el.className = 'gate ' + g.verdict.toLowerCase();
+    el.className = 'exhibit ' + g.verdict.toLowerCase();
     const pval = g.leading_p != null ? ` · p ${g.leading_p.toExponential(1)}` : '';
     el.innerHTML =
-      `<h3><span>dimension: ${dim}</span><span class="v">${g.verdict}</span></h3>
+      `<h3><span class="dim">dimension: ${dim}</span><span class="chip ${g.verdict.toLowerCase()}">${g.verdict}</span></h3>
        <ul>${g.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
-       <div class="nums">leader: ${g.leading_segment ?? '—'} · concentration ${g.concentration.toFixed(2)}
-         · interaction ${g.interaction_share.toFixed(2)} · n ${g.leading_sample_n ?? '—'}${pval}</div>`;
-    gates.appendChild(el);
+       <div class="data-row">leader <span>${g.leading_segment ?? '—'}</span> concentration <span>${g.concentration.toFixed(2)}</span>
+         interaction <span>${g.interaction_share.toFixed(2)}</span> n <span>${g.leading_sample_n ?? '—'}</span>${pval}</div>`;
+    exhibits.appendChild(el);
   }
 
   const d = b.drilldown;
-  $('drill').style.display = d ? 'block' : 'none';
+  $('drilldown').style.display = d ? 'block' : 'none';
   if (d) {
     const parent = `${d.parent.dim} = ${d.parent.segment}`;
-    $('drill').innerHTML = d.refined
+    $('drilldown').innerHTML = d.refined
       ? `drill-down: within <b>${parent}</b>, the cause narrows to <b>${d.refined.dim} = ${d.refined.segment}</b> (concentration ${d.refined.concentration.toFixed(2)})`
       : `drill-down: within <b>${parent}</b>, no sub-dimension localizes further — the whole segment is affected`;
   }
 
   $('action').style.display = b.action ? 'block' : 'none';
-  if (b.action) $('action').innerHTML = `<b>${b.action.kind}</b> — ${b.action.detail}`;
+  if (b.action) $('action').innerHTML = `<span class="kind">${b.action.kind}</span>${b.action.detail}`;
 
-  $('report').textContent = b.report || '';
-  if (b.llm) $('report').textContent += `  [${b.llm.mode === 'real' ? 'Qwen: ' + b.llm.model : b.llm.mode}]`;
+  $('report').style.display = b.report ? 'block' : 'none';
+  if (b.report) {
+    let html = b.report;
+    if (b.llm) html += `<span class="llm-tag">[${b.llm.mode === 'real' ? 'Qwen: ' + b.llm.model : b.llm.mode}]</span>`;
+    $('report').innerHTML = html;
+  }
 
   const specs = b.speculations || [];
   $('spec').style.display = specs.length ? 'block' : 'none';
@@ -231,6 +399,11 @@ function render(b) {
 
   $('trace').innerHTML = (b.trace || []).map(t => `<li>${t}</li>`).join('');
 }
+
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => runPanel(t.dataset.panel)));
+$('askBtn').addEventListener('click', runQuery);
+$('query').addEventListener('keydown', e => { if (e.key === 'Enter') runQuery(); });
+$('uploadBtn').addEventListener('click', runUpload);
 </script>
 </body>
 </html>
