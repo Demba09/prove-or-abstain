@@ -107,6 +107,11 @@ POST /investigate/sql
           "current_query": "<single SELECT>", "autopilot": false, "sum_metrics": "" }
   pulls both panels straight from a database (connectors/sql.py) instead of a
   CSV round trip — same long-panel contract, see "Live data: the SQL connector" below
+POST /investigate/sheets
+  body: { "baseline_url": "<docs.google.com spreadsheet URL>",
+          "current_url": "<docs.google.com spreadsheet URL>", "autopilot": false, "sum_metrics": "" }
+  pulls both panels from a Google Sheet (connectors/gsheets.py) — same
+  long-panel contract, see "Live data: Google Sheets" below
 POST /investigate/series
   multipart: series=<csv with a 'period' column>, window=<int, optional>
   last period vs. a rolling baseline pooled over the prior `window` periods
@@ -220,6 +225,26 @@ no access beyond what that connection already has. The one guard it adds
 safety rail against accidents, not a substitute for connecting with a
 SELECT-only role or a reporting replica in a real deployment.
 
+### Live data: Google Sheets
+
+`POST /investigate/sheets` reads two Google Sheets (or two tabs of the same
+sheet, via their `gid`) directly — no export-to-CSV-then-upload step. Each
+sheet must already be in the long-panel shape and shared as "anyone with
+the link" (or published to the web):
+
+```bash
+curl -X POST localhost:8000/investigate/sheets -H 'content-type: application/json' -d '{
+  "baseline_url": "https://docs.google.com/spreadsheets/d/<id>/edit#gid=0",
+  "current_url":  "https://docs.google.com/spreadsheets/d/<id>/edit#gid=1"
+}'
+```
+
+`connectors/gsheets.py` accepts a share link, an `edit#gid=` link, or an
+already-built CSV export link, and normalizes any of them to the sheet's
+CSV export endpoint. It only ever requests `docs.google.com` — any other
+host is rejected before a request is made, so this can't be repurposed as
+a general URL fetcher.
+
 ## Attribution math
 
 For a rate metric `R = Σ wₛ·rₛ` (segment weight × segment rate), the change
@@ -260,8 +285,9 @@ docker buildx build --platform linux/amd64 \
 
 ## Limitations
 
-- A SQL connector exists (`/investigate/sql`, Postgres/MySQL/SQLite); a
-  managed warehouse/Stripe/GA connector with OAuth is still out of scope.
+- SQL (Postgres/MySQL/SQLite) and Google Sheets connectors exist; Stripe,
+  GA, and anything requiring OAuth (vs. a DSN or a shared link) are still
+  out of scope.
 - The rolling baseline pools prior periods; there is no seasonality or trend
   modelling.
 - Drill-down goes one level deep (winning segment × one other dimension).

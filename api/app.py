@@ -36,7 +36,9 @@ from pydantic import BaseModel
 load_dotenv()  # local: reads .env; in the container the file is absent
                # (.dockerignore) and runtime-injected variables win anyway.
 
-from connectors.sql import SqlQueryError, fetch_panel
+from connectors.gsheets import SheetError
+from connectors.gsheets import fetch_panel as fetch_sheet_panel
+from connectors.sql import SqlQueryError, fetch_panel as fetch_sql_panel
 from graph import APP as INVESTIGATION_GRAPH
 from llm import get_client
 from panels import BASELINE, CLEAN, DEEP, DIFFUSE, MIXSHIFT, split_series
@@ -79,6 +81,13 @@ class SqlRequest(BaseModel):
     current_query: str
     autopilot: bool = False
     sum_metrics: str = ""     # comma-separated SUM-kind metric names
+
+
+class SheetsRequest(BaseModel):
+    baseline_url: str         # a docs.google.com spreadsheet URL (or tab, via gid)
+    current_url: str
+    autopilot: bool = False
+    sum_metrics: str = ""
 
 
 def _jsonable(v):
@@ -240,8 +249,8 @@ def investigate_sql(req: SqlRequest) -> dict:
     access beyond what that connection already grants, and restricts each
     query to a single SELECT statement."""
     try:
-        base = fetch_panel(req.dsn, req.baseline_query)
-        curr = fetch_panel(req.dsn, req.current_query)
+        base = fetch_sql_panel(req.dsn, req.baseline_query)
+        curr = fetch_sql_panel(req.dsn, req.current_query)
     except SqlQueryError as exc:
         raise HTTPException(400, str(exc))
 
@@ -258,6 +267,35 @@ def investigate_sql(req: SqlRequest) -> dict:
                                 autopilot=req.autopilot,
                                 metric_kinds=_parse_kinds(req.sum_metrics, metrics))
     return {"panel": "sql", **result}
+
+
+@app.post("/investigate/sheets")
+def investigate_sheets(req: SheetsRequest) -> dict:
+    """Pull baseline/current straight from a Google Sheet (connectors/gsheets.py)
+    instead of a CSV round trip — the sheet (or tab, via its gid) must
+    already be shared as 'anyone with the link' or published to the web,
+    and must already be in the long-panel shape [metric, <dims...>, n, c].
+    Only docs.google.com URLs are accepted; anything else is rejected
+    before any request is made."""
+    try:
+        base = fetch_sheet_panel(req.baseline_url)
+        curr = fetch_sheet_panel(req.current_url)
+    except SheetError as exc:
+        raise HTTPException(400, str(exc))
+
+    base = _validate_panel(base, "baseline_url")
+    curr = _validate_panel(curr, "current_url")
+    if set(base.columns) != set(curr.columns):
+        raise HTTPException(400, "baseline_url and current_url must have the same columns")
+    if set(base["metric"].unique()) != set(curr["metric"].unique()):
+        raise HTTPException(400, "baseline_url and current_url must cover the same metrics")
+
+    dims = [c for c in base.columns if c not in _RESERVED]
+    metrics = sorted(base["metric"].unique())
+    result = _run_investigation(base, curr, metrics=metrics, dims=dims,
+                                autopilot=req.autopilot,
+                                metric_kinds=_parse_kinds(req.sum_metrics, metrics))
+    return {"panel": "sheets", **result}
 
 
 @app.post("/investigate/series")

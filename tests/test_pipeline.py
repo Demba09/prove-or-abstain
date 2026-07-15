@@ -14,6 +14,7 @@ os.environ["QWEN_MOCK"] = "1"   # before any import that instantiates the LLM cl
 
 import numpy as np
 import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 
 from api.app import app
@@ -349,5 +350,74 @@ def test_sql_connector_rejects_stacked_statements(tmp_path):
     dsn = _sqlite_dsn(tmp_path, {})
     r = client.post("/investigate/sql", json={
         "dsn": dsn, "baseline_query": "SELECT 1; DROP TABLE sqlite_master", "current_query": "SELECT 1",
+    })
+    assert r.status_code == 400
+
+
+# ----------------------------------------------------------- Google Sheets
+def test_gsheets_url_normalization():
+    from connectors.gsheets import _to_csv_url
+
+    edit = "https://docs.google.com/spreadsheets/d/ABC123/edit#gid=42"
+    assert _to_csv_url(edit) == "https://docs.google.com/spreadsheets/d/ABC123/export?format=csv&gid=42"
+
+    share = "https://docs.google.com/spreadsheets/d/ABC123/edit?usp=sharing"
+    assert _to_csv_url(share) == "https://docs.google.com/spreadsheets/d/ABC123/export?format=csv&gid=0"
+
+    already_csv = "https://docs.google.com/spreadsheets/d/ABC123/export?format=csv&gid=7"
+    assert _to_csv_url(already_csv) == already_csv
+
+
+def test_gsheets_rejects_non_google_host():
+    from connectors.gsheets import SheetError, _to_csv_url
+    with pytest.raises(SheetError):
+        _to_csv_url("https://evil.example.com/spreadsheets/d/ABC123/edit")
+
+
+def test_gsheets_fetch_panel_mocked(monkeypatch):
+    from connectors import gsheets
+
+    class FakeResp:
+        text = "metric,segment,n,c\nconversion,paid,100,7\n"
+        def raise_for_status(self): pass
+
+    monkeypatch.setattr(gsheets.requests, "get", lambda url, timeout=15: FakeResp())
+    df = gsheets.fetch_panel("https://docs.google.com/spreadsheets/d/ABC123/edit")
+    assert list(df.columns) == ["metric", "segment", "n", "c"]
+    assert df.iloc[0]["c"] == 7
+
+
+def test_gsheets_fetch_panel_rejects_private_sheet(monkeypatch):
+    from connectors import gsheets
+
+    class FakeResp:
+        text = "<html>sign in</html>"
+        def raise_for_status(self): pass
+
+    monkeypatch.setattr(gsheets.requests, "get", lambda url, timeout=15: FakeResp())
+    with pytest.raises(gsheets.SheetError):
+        gsheets.fetch_panel("https://docs.google.com/spreadsheets/d/ABC123/edit")
+
+
+def test_sheets_endpoint_matches_upload(monkeypatch):
+    from panels import BASELINE, CLEAN
+
+    def fake_fetch(url):
+        return BASELINE if "baseline" in url else CLEAN
+
+    monkeypatch.setattr("api.app.fetch_sheet_panel", fake_fetch)
+    body = client.post("/investigate/sheets", json={
+        "baseline_url": "https://docs.google.com/spreadsheets/d/baseline/edit",
+        "current_url": "https://docs.google.com/spreadsheets/d/current-clean/edit",
+    }).json()
+    assert body["panel"] == "sheets"
+    assert body["verdict"] == "ASSERT"
+    assert body["root_cause"] == {"dimension": "segment", "segment": "paid"}
+
+
+def test_sheets_endpoint_rejects_non_google_url():
+    r = client.post("/investigate/sheets", json={
+        "baseline_url": "https://evil.example.com/x",
+        "current_url": "https://evil.example.com/y",
     })
     assert r.status_code == 400

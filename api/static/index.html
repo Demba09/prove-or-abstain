@@ -266,6 +266,21 @@ footer a { color: var(--accent-strong); }
       <button class="secondary" type="button" id="sqlBtn">investigate SQL</button>
     </div>
 
+    <div class="divider"></div>
+
+    <p class="eyebrow">Or read from Google Sheets</p>
+    <div class="upload-row">
+      <div class="field">
+        <label class="field-label" for="baselineSheet">Baseline sheet URL — shared as "anyone with the link"</label>
+        <input type="text" id="baselineSheet" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0">
+      </div>
+      <div class="field">
+        <label class="field-label" for="currentSheet">Current sheet URL — same long-panel columns</label>
+        <input type="text" id="currentSheet" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0">
+      </div>
+      <button class="secondary" type="button" id="sheetsBtn">investigate sheets</button>
+    </div>
+
     <p id="error" role="alert"></p>
   </div>
 
@@ -372,6 +387,19 @@ function runSql() {
   });
 }
 
+function runSheets() {
+  const baselineUrl = $('baselineSheet').value.trim();
+  const currentUrl = $('currentSheet').value.trim();
+  if (!baselineUrl || !currentUrl) return fail('Fill in both sheet URLs.');
+  setActiveTab(null);
+  call('/investigate/sheets', {
+    method: 'POST',
+    headers: {'content-type': 'application/json'},
+    body: JSON.stringify({baseline_url: baselineUrl, current_url: currentUrl,
+                          autopilot: $('autopilot').checked}),
+  });
+}
+
 function render(b) {
   $('result').style.display = 'block';
 
@@ -445,6 +473,7 @@ $('askBtn').addEventListener('click', runQuery);
 $('query').addEventListener('keydown', e => { if (e.key === 'Enter') runQuery(); });
 $('uploadBtn').addEventListener('click', runUpload);
 $('sqlBtn').addEventListener('click', runSql);
+$('sheetsBtn').addEventListener('click', runSheets);
 </script>
 </body>
 </html>
