@@ -725,3 +725,23 @@ def test_cost_tracker_pricing():
 def test_api_reports_cost_zero_in_mock():
     body = client.post("/investigate", json={"panel": "clean", "mode": "agent"}).json()
     assert body["cost"]["usd"] == 0.0 and body["cost"]["tokens"] == 0
+
+
+# ------------------------------------------------------------- calibration
+
+def test_calibration_perfect_set_has_low_ece():
+    from prove_or_abstain.calibrate import calibrate_confidence
+    # 9/10 correct at confidence 0.9 => accuracy == confidence => ECE ~ 0
+    recs = [{"got": "ASSERT", "confidence": 0.9, "correct": i < 9} for i in range(10)]
+    cal = calibrate_confidence(recs)
+    assert cal["n"] == 10
+    assert cal["ece"] < 0.02
+
+
+def test_calibration_over_benchmark():
+    from prove_or_abstain.benchmark import run_benchmark
+    from prove_or_abstain.calibrate import calibrate_confidence
+    cal = calibrate_confidence(run_benchmark("agent", verbose=False)["records"])
+    assert cal["n"] > 0
+    assert 0.0 <= cal["ece"] <= 1.0
+    assert sum(b["count"] for b in cal["buckets"]) == cal["n"]
