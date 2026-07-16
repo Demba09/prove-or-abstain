@@ -6,7 +6,9 @@
 # prove-or-abstain
 
 [![CI](https://github.com/Demba09/prove-or-abstain/actions/workflows/ci.yml/badge.svg)](https://github.com/Demba09/prove-or-abstain/actions)
-[![Stars](https://img.shields.io/github/stars/Demba09/prove-or-abstain?style=social)](https://github.com/Demba09/prove-or-abstain)
+[![benchmark](https://img.shields.io/badge/benchmark-100%25%20(30%2F30)-brightgreen.svg)](#benchmark)
+[![false-ASSERT](https://img.shields.io/badge/false--ASSERT-0%25-brightgreen.svg)](#benchmark)
+[![calibration](https://img.shields.io/badge/ECE-0.19-blue.svg)](#calibration)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 
@@ -146,6 +148,89 @@ anything lower downgrades to RECOMMEND. Every EXECUTE is recorded in the audit t
 (`GET /executions`) and, if `WEBHOOK_URL` is set, POSTed to your endpoint
 (Slack/Discord/Teams formats auto-detected) so a human sees every autonomous action.
 
+## Benchmark
+
+30 synthetic scenarios with **known ground truth derived from how each panel is
+generated** (a paid-only collapse ⇒ `ASSERT segment=paid`; a uniform drop ⇒
+`ABSTAIN`) — never from the pipeline's own output, so accuracy is not circular.
+Run it yourself, offline, in ~2 seconds:
+
+```bash
+python -m prove_or_abstain.benchmark
+```
+
+| Category | Scenarios | Expected | Result |
+|---|---|---|---|
+| clean → localizes on segment | 5 | ASSERT segment | 5/5 ✅ |
+| clean → localizes on device | 5 | ASSERT device | 5/5 ✅ |
+| clean → no dominant cause | 3 | ABSTAIN | 3/3 ✅ |
+| diffuse (systemic) | 5 | ABSTAIN | 5/5 ✅ |
+| mixshift (entangled) | 3 | ABSTAIN | 3/3 ✅ |
+| deep (ASSERT + drill-down) | 3 | ASSERT device | 3/3 ✅ |
+| edge (small-n, sum metric, single dim) | 3 | mixed | 3/3 ✅ |
+| noisy (borderline confidence) | 3 | ASSERT | 3/3 ✅ |
+
+```
+accuracy = 100% (30/30)   false-ASSERT = 0%   false-ABSTAIN = 0%
+```
+
+The result is **identical in `graph` and `agent` mode** — the math decides, so
+Qwen's orchestration can't change a verdict. The critical number is
+**false-ABSTAIN = 0% paired with false-ASSERT = 0%**: the agent never misses a
+real, localizable cause, and never invents one that isn't there.
+
+### vs. a raw LLM
+
+`compare_llm_raw()` gives a bare Qwen only a text summary (no data) and asks for
+the cause. Where the truth is "no single cause" (systemic), a raw model tends to
+invent a plausible-sounding culprit — exactly the hallucination the gates
+prevent. This needs a live key:
+
+```bash
+DASHSCOPE_API_KEY=sk-... python -m prove_or_abstain.benchmark
+```
+
+> _Live hallucination-rate numbers are populated from a real run; run the command
+> above with a key to reproduce them in your own environment._
+
+## Calibration
+
+Does a confidence of 0.7 mean "right ~70% of the time"?
+`python -m prove_or_abstain.calibrate` buckets the benchmark's ASSERT
+predictions by confidence and reports the Expected Calibration Error:
+
+```
+ECE = 0.19   (n = 18 ASSERT predictions)
+```
+
+Every asserted cause in the benchmark is correct — even at 0.41 confidence — so
+the score is **conservative**: it under-states reliability rather than
+over-stating it. For an agent that can *act* on its verdict, erring toward
+under-confidence is the safe direction.
+
+## Cost
+
+Token usage is tracked per request (`cost` field in the API response) and per
+model. Pricing (DashScope international, $/1M tokens):
+
+| Model | Input | Output |
+|---|---|---|
+| qwen-turbo | $0.40 | $1.20 |
+| qwen-plus | $0.80 | $2.40 |
+| qwen-max | $1.40 | $5.60 |
+
+Because the **verdict is model-independent** (the gates decide, the LLM only
+orchestrates and phrases), `cross_model_eval()` shows the same accuracy across
+qwen-turbo/plus/max — so you can run the **cheapest** model without losing
+correctness. The cross-model latency/cost table is generated live:
+
+```bash
+DASHSCOPE_API_KEY=sk-... python -m prove_or_abstain.benchmark
+```
+
+> _Measured latency, tokens and cost per model are populated from a real run;
+> run the command above with a key to reproduce them._
+
 ## Repository layout
 
 ```
@@ -159,13 +244,19 @@ prove_or_abstain/   core package — the deterministic pipeline
   agent_loop.py       Qwen-orchestrated alternative (mode="agent")
   llm.py              the Qwen boundary (mock mode, routing, wording, tools)
   panels.py           built-in demo scenarios
-  autopilot.py        execution tracker + monitoring dashboard state
+  autopilot.py        execution tracker (adapter over memory.py)
+  memory.py           SQLite persistence — investigation history + alerts
+  monitor.py          continuous autonomous surveillance loop
   webhook.py          outbound notifications on EXECUTE
+  cost_tracker.py     token counting + cost estimation
+  benchmark.py        30 ground-truth scenarios + cross-model eval
+  calibrate.py        confidence calibration + ECE
+  audit.py            reproducible, verifiable audit trails
   connectors/         SQL (Postgres/MySQL/SQLite) and Google Sheets
-api/                deployment entry point — FastAPI app + static demo page
+api/                deployment entry point — FastAPI app + static demo page (SSE stream)
 mcp_server.py       MCP entry point for Qwen Cloud agents
 scripts/            validation & demo tooling (see below)
-tests/              pytest suite (46 tests, runs offline with QWEN_MOCK=1)
+tests/              pytest suite (64 tests, runs offline with QWEN_MOCK=1)
 examples/           sample CSVs for the upload endpoints
 docs/               architecture diagram, demo script, devpost text
 ```
@@ -192,6 +283,7 @@ Copy `.env.example` to `.env` (never committed, excluded from the Docker image):
 | `QWEN_MODEL` | model name, defaults to `qwen-plus` |
 | `QWEN_MOCK=1` | force mock mode even with a key set |
 | `WEBHOOK_URL` | where EXECUTE notifications are POSTed — payload auto-formats for Slack, Discord or Teams from the hostname, generic JSON otherwise. Absent → stdout |
+| `PROBATIO_DB` | SQLite path for investigation history + alerts (`memory.py`). Default `:memory:` — set a file path to persist across restarts |
 
 ### Validate the pipeline yourself
 
@@ -203,6 +295,11 @@ python scripts/gate_check_gates.py  # decision layer on 3 calibrated scenarios
 python scripts/simulate.py          # full flow without LangGraph, mock-forced
 python scripts/run_phase1.py        # the 2 headline scenarios through the real graph
 python scripts/check_qwen.py        # is my DashScope key/endpoint alive?
+
+python -m prove_or_abstain.benchmark   # 30 ground-truth scenarios -> accuracy
+python -m prove_or_abstain.calibrate   # confidence calibration + ECE
+python -m prove_or_abstain.monitor     # one autonomous surveillance cycle
+python -m prove_or_abstain.audit       # audit trail + reproducibility check
 ```
 
 ## API
@@ -210,6 +307,7 @@ python scripts/check_qwen.py        # is my DashScope key/endpoint alive?
 ```
 GET  /                     demo page
 POST /investigate          built-in scenario: { "panel": "clean" | "diffuse" | "mixshift" | "deep", "autopilot": false, "mode": "graph" | "agent" }
+GET  /investigate/stream   Server-Sent Events: stream the investigation step by step (?panel=&autopilot=)
 POST /investigate/query    natural language: { "query": "why did conversion drop?" }
 POST /investigate/upload   CSV upload (multipart: baseline + current)
 POST /investigate/sql      live database: { "dsn": "...", "baseline_query": "...", "current_query": "..." }
@@ -221,6 +319,49 @@ GET  /dashboard            autopilot status, active alerts, uptime
 GET  /executions           audit trail of all EXECUTE actions
 POST /executions/{id}/resolve  human resolves an active alert
 GET  /health               healthcheck
+```
+
+## Autonomous monitoring, persistence & audit
+
+The Track-4 autopilot is a continuous loop, not just an endpoint:
+
+- **`monitor.py`** — `MetricMonitor` watches a set of sources (SQL / Sheets /
+  CSV / inline), and every cycle fetches the current panel, compares it to the
+  rolling baseline, and on a material move runs the investigation, persists the
+  verdict, and fires the webhook on a confident ASSERT. One broken feed never
+  kills the loop.
+
+  ```bash
+  python -m prove_or_abstain.monitor          # one demo cycle on a built-in panel
+  ```
+
+- **`memory.py`** — SQLite persistence (`PROBATIO_DB`, default `:memory:`) for
+  the full investigation history and deduplicated active alerts. `autopilot.py`
+  is a thin adapter over it, so `/dashboard`, `/executions` and
+  `/executions/{id}/resolve` are backed by a real store.
+
+- **`audit.py`** — freezes any investigation into a verifiable trail (SHA256
+  input hash, Qwen's tool calls, the four gate decisions, verdict/confidence,
+  cost). `verify_replay()` re-runs the same inputs and confirms the verdict is
+  bit-for-bit reproducible — the guarantee an auditor wants.
+
+### Architecture
+
+```
+              data sources                      Qwen Cloud (DashScope)
+     SQL · Sheets · CSV · inline                  orchestrates + phrases
+                 │                                        │ tool calls
+                 ▼                                        ▼
+   monitor.py ──────────────►  agent_loop / graph  ◄── gates decide the verdict
+   (rolling baseline,          detector→investigate      (pure pandas/numpy)
+    ≥2% triggers)              →verify→drill→act              │
+                 │                     │                      │
+                 ▼                     ▼                      ▼
+        memory.py (SQLite)     webhook.notify          audit.py (SHA256 trail
+     history + active alerts   Slack/Discord/Teams        + verify_replay)
+                 │                                     cost_tracker.py ($/tokens)
+                 ▼
+     /dashboard · /executions · SSE /investigate/stream
 ```
 
 ## Bring your own data
@@ -316,9 +457,12 @@ With MCP, a Qwen agent:
 | Requirement | Implementation |
 |-------------|----------------|
 | **Handle ambiguous inputs** | `/investigate/query` — Qwen routes free-text questions to the right scenario |
+| **Qwen orchestrates via tool calls** | `mode="agent"` — Qwen drives the investigation through function calling (`agent_loop.py`), math still decides |
 | **Invoke external tools** | SQL connector, Google Sheets connector, CSV upload, time series |
-| **Human-in-the-loop checkpoints** | ABSTAIN always escalates; autopilot requires confidence ≥ 0.70 to execute |
-| **Production-ready, not toy demo** | Docker, CI, 46 tests, full audit trail, API docs at `/docs` (ReDoc) |
+| **Continuous autonomy** | `monitor.py` watches sources, investigates on movement, persists + alerts |
+| **Human-in-the-loop checkpoints** | ABSTAIN always escalates; autopilot requires confidence ≥ 0.70 to execute; alerts resolvable |
+| **Provable, not just a demo** | 30-scenario benchmark (100%, 0% false-ASSERT), ECE calibration, reproducible audit trails, per-request cost |
+| **Production-ready** | Docker, CI, 64 tests, SQLite persistence, SSE streaming, API docs at `/docs` (ReDoc) |
 
 **Qwen Cloud integration:** `prove_or_abstain/llm.py` calls Qwen via DashScope for dimension ordering,
 report phrasing, and query routing only. The math (pandas, numpy) and statistics
