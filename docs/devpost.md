@@ -40,11 +40,11 @@ Cloud Function Compute as-is.
 
 - **The math first.** Before any agent logic existed, we built the exact
   rate/mix/interaction decomposition and validated it against a hand-derived
-  oracle (`attribution_reference.py` / `gate_check.py`) on three calibrated
+  oracle (`scripts/attribution_reference.py` / `scripts/gate_check.py`) on three calibrated
   scenarios: a clean localized cause, a diffuse uniform shift, and a mix
   shift where composition and rate move together. Zero residual, verified.
-- **Gates before agent.** The ASSERT/ABSTAIN decision (`gates.py`) was tuned
-  and validated (`gate_check_gates.py`) against those same three scenarios
+- **Gates before agent.** The ASSERT/ABSTAIN decision (`prove_or_abstain/gates.py`) was tuned
+  and validated (`scripts/gate_check_gates.py`) against those same three scenarios
   *before* wiring the LangGraph loop around it — so the safety property was
   proven independently of the orchestration.
 - **LangGraph for the bounded loop.** `detector → hypothesizer → investigator

@@ -1,13 +1,19 @@
 """
-simulate.py — runs the flow WITHOUT langgraph, replicating the routing, to
+scripts/simulate.py — runs the flow WITHOUT langgraph, replicating the routing, to
 validate the logic end to end. Forces mock mode: always offline and
 deterministic, even if a Qwen key is configured.
 """
+import sys
+from pathlib import Path
+
+# Runnable both as `python scripts/x.py` and `python -m scripts.x`:
+# put the repo root on sys.path so `prove_or_abstain` and `scripts` resolve.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import os
 os.environ["QWEN_MOCK"] = "1"   # before any import that instantiates the client
 
-from panels import BASELINE, CLEAN, DIFFUSE
-from nodes import (detector, route_after_detect, hypothesizer, investigator,
+from prove_or_abstain.panels import BASELINE, CLEAN, DIFFUSE
+from prove_or_abstain.nodes import (detector, route_after_detect, hypothesizer, investigator,
                    verifier, route_after_verify, driller, actuator, reporter)
 
 

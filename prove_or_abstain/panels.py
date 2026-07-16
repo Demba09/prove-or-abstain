@@ -1,5 +1,5 @@
 """
-panels.py — multimetric/multidim demo data + projection.
+prove_or_abstain/panels.py — multimetric/multidim demo data + projection.
 
 Long panel: one row per atomic cell [metric, segment, device, n, c]
 (raw counts; rates are ALWAYS derived downstream).

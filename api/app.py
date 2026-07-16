@@ -11,7 +11,7 @@ graph.invoke(state) and serialize the final AgentState (ASSERT/ABSTAIN
 verdict, per-dimension gates, root cause, drill-down, report, trace).
 No business logic lives here — everything is in the nodes.
 
-Expected CSV format (long panel, same columns as panels.py):
+Expected CSV format (long panel, same columns as prove_or_abstain/panels.py):
     metric, <dim1>, [<dim2>, ...], n, c
 Dimensions are inferred: every column except {metric, n, c, period}.
 
@@ -20,7 +20,9 @@ Run: uvicorn api.app:app --reload
 
 from __future__ import annotations
 
+import asyncio
 import io
+import json
 import math
 from dataclasses import asdict
 from pathlib import Path
@@ -30,20 +32,24 @@ import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+from pydantic import BaseModel, Field
 
-load_dotenv()  # local: reads .env; in the container the file is absent
-               # (.dockerignore) and runtime-injected variables win anyway.
+load_dotenv()
 
-from connectors.gsheets import SheetError
-from connectors.gsheets import fetch_panel as fetch_sheet_panel
-from connectors.sql import SqlQueryError, fetch_panel as fetch_sql_panel
-from graph import APP as INVESTIGATION_GRAPH
-from llm import get_client
-from panels import BASELINE, CLEAN, DEEP, DIFFUSE, MIXSHIFT, split_series
+from prove_or_abstain.autopilot import get_dashboard, record_check, resolve_execution, record_execution, get_executions
+from prove_or_abstain.webhook import notify
+from prove_or_abstain.connectors.gsheets import SheetError
+from prove_or_abstain.connectors.gsheets import fetch_panel as fetch_sheet_panel
+from prove_or_abstain.connectors.sql import SqlQueryError, fetch_panel as fetch_sql_panel
+from prove_or_abstain.agent_loop import investigate_agentic
+from prove_or_abstain.graph import APP as INVESTIGATION_GRAPH
+from prove_or_abstain.llm import get_client
+from prove_or_abstain.panels import BASELINE, CLEAN, DEEP, DIFFUSE, MIXSHIFT, split_series
 
-app = FastAPI(title="prove-or-abstain", version="0.4.0")
+# docs_url=None frees /docs from the built-in Swagger route so the
+# redirect below can point it at ReDoc instead.
+app = FastAPI(title="prove-or-abstain", version="0.4.0", docs_url=None)
 
 # The four demo panels: CLEAN/DEEP -> ASSERT, DIFFUSE/MIXSHIFT -> ABSTAIN.
 _PANELS = {"clean": CLEAN, "diffuse": DIFFUSE, "mixshift": MIXSHIFT, "deep": DEEP}
@@ -68,6 +74,9 @@ _RESERVED = _REQUIRED | {"period"}           # non-dimension columns
 class InvestigateRequest(BaseModel):
     panel: Literal["clean", "diffuse", "mixshift", "deep"] = "clean"
     autopilot: bool = False   # only takes effect on ASSERT + confidence >= 0.70
+    # "graph": the fixed LangGraph pipeline. "agent": Qwen orchestrates the
+    # investigation via tool calls (the verdict is identical either way).
+    mode: Literal["graph", "agent"] = "graph"
 
 
 class QueryRequest(BaseModel):
@@ -107,7 +116,8 @@ def _jsonable(v):
 def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
                        metrics: list[str], dims: list[str],
                        autopilot: bool,
-                       metric_kinds: dict | None = None) -> dict:
+                       metric_kinds: dict | None = None,
+                       mode: str = "graph") -> dict:
     state = {
         "baseline": baseline,
         "current": current,
@@ -117,10 +127,31 @@ def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
         "autopilot_enabled": autopilot,
         "trace": [],
     }
-    final = INVESTIGATION_GRAPH.invoke(state)
+    # Snapshot the cost tracker so `cost` reports THIS request's spend, not the
+    # process-cumulative total (0 in mock mode).
+    _client = get_client()
+    _tok0, _usd0 = _client.tracker.total_tokens, _client.tracker.cost_usd
+
+    # Both paths produce the same verdict; "agent" adds Qwen's tool-call trace.
+    final = investigate_agentic(state) if mode == "agent" \
+        else INVESTIGATION_GRAPH.invoke(state)
 
     win = final.get("winning_report")
     drill = final.get("drilldown")
+
+    actions = final.get("actions")
+    if actions and actions[0].kind == "EXECUTE":
+        a = actions[0]
+        cause = f"{a.dim}={a.segment}" if a.dim else None
+        record_execution(
+            a.metric, a.dim, a.segment, final.get("confidence", 0.0),
+            a.kind, a.detail,
+            final.get("report", ""), final.get("trace", []),
+        )
+        notify(a.metric, final.get("verdict", "ASSERT"),
+               final.get("confidence", 0.0),
+               cause, a.kind, a.detail)
+
     return _jsonable({
         "verdict": final.get("verdict"),
         "confidence": final.get("confidence"),
@@ -141,7 +172,13 @@ def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
         "report": final.get("report"),
         "speculations": final.get("speculations", []),
         "llm": final.get("llm"),
+        "cost": {
+            "model": _client.tracker.model,
+            "tokens": _client.tracker.total_tokens - _tok0,
+            "usd": round(_client.tracker.cost_usd - _usd0, 6),
+        },
         "trace": final.get("trace", []),
+        "agent_trace": final.get("agent_trace", []),
     })
 
 
@@ -153,6 +190,11 @@ def home() -> FileResponse:
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@app.get("/docs", include_in_schema=False)
+def docs() -> RedirectResponse:
+    return RedirectResponse(url="/redoc")
 
 
 # The built-in panels never change: serialize them once at import instead
@@ -183,8 +225,48 @@ def investigate(req: InvestigateRequest) -> dict:
         metrics=_METRICS,
         dims=["device", "segment"],
         autopilot=req.autopilot,
+        mode=req.mode,
     )
     return {"panel": req.panel, **result}
+
+
+@app.get("/investigate/stream")
+async def investigate_stream(panel: Literal["clean", "diffuse", "mixshift", "deep"] = "clean",
+                            autopilot: bool = False) -> StreamingResponse:
+    """Server-Sent Events: stream the investigation step by step (detector →
+    testing → gate_result → verdict → drill → action → done). Runs the agent
+    loop in a threadpool and bridges its on_event callback to the async
+    response through an asyncio.Queue."""
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+
+    def on_event(event_type: str, data: dict) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, (event_type, data))
+
+    def run() -> None:
+        state = {
+            "baseline": BASELINE, "current": _PANELS[panel], "metrics": _METRICS,
+            "metric_kinds": {}, "dims": ["device", "segment"],
+            "autopilot_enabled": autopilot, "trace": [],
+        }
+        try:
+            investigate_agentic(state, on_event=on_event)
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, None)  # end sentinel
+
+    async def gen():
+        task = loop.run_in_executor(None, run)
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                event_type, data = item
+                yield f"event: {event_type}\ndata: {json.dumps(_jsonable(data))}\n\n"
+        finally:
+            await task
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @app.post("/investigate/query")
@@ -358,3 +440,54 @@ def investigate_series(series: UploadFile = File(...),
     result = _investigate_pair(base, curr, "series baseline", "series current",
                                autopilot, sum_metrics)
     return {"panel": "series", **result}
+
+
+# ----------------------------------------------------------- autonomous autopilot
+@app.post("/investigate/check")
+def investigate_check() -> dict:
+    """Autonomous monitoring endpoint — runs the investigation on ALL four
+    built-in panels with autopilot ON. Designed to be called by a scheduler
+    (cron, Alibaba Cloud SchedulerX, etc.). Returns a summary of what was
+    detected and any actions taken.
+
+    An ASSERT+EXECUTE that fires creates an execution record visible at
+    GET /dashboard and POST /executions/{id}/resolve."""
+    results = []
+    for panel_name, panel_df in _PANELS.items():
+        result = _run_investigation(
+            BASELINE, panel_df,
+            metrics=_METRICS,
+            dims=["device", "segment"],
+            autopilot=True,
+        )
+        result["panel"] = panel_name
+        results.append(result)
+
+    verdicts = [r["verdict"] for r in results]
+    summary_verdict = "ASSERT_ACTED" if "ASSERT" in verdicts else "NO_ANOMALY"
+    record_check(summary_verdict)
+    return {"verdict": summary_verdict, "panels": results}
+
+
+@app.get("/dashboard", include_in_schema=True)
+def dashboard() -> dict:
+    return asdict(get_dashboard())
+
+
+@app.get("/executions", include_in_schema=True)
+def list_executions() -> dict:
+    ex = get_executions()
+    return {"executions": [asdict(e) for e in ex.values()]}
+
+
+class ResolveRequest(BaseModel):
+    id: str
+    resolved_by: str = Field(default="human")
+
+
+@app.post("/executions/{exec_id}/resolve", include_in_schema=True)
+def resolve_exec(exec_id: str, body: ResolveRequest) -> dict:
+    entry = resolve_execution(exec_id, body.resolved_by)
+    if entry is None:
+        raise HTTPException(404, f"execution {exec_id!r} not found or already resolved")
+    return {"resolved": asdict(entry)}

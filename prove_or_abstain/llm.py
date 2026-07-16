@@ -13,6 +13,10 @@ decides no verdict. It does exactly four things:
   - route_query()     : map a free-text question to one of the built-in
     panels/metrics. It only SELECTS among options the caller supplies —
     it cannot invent a panel or metric that doesn't exist.
+  - chat_with_tools() : ORCHESTRATE an investigation via tool calls. Qwen
+    chooses which dimensions to test and when to stop; the tools run the
+    same deterministic math, and the verdict is recomputed from the gate
+    reports afterwards — so Qwen drives the path, never the outcome.
 
 Mock mode: if DASHSCOPE_API_KEY is absent or QWEN_MOCK=1, no network call is
 made and deterministic outputs are returned — the pipeline runs offline.
@@ -62,6 +66,16 @@ class QwenClient:
         # last call, not just what was requested.
         self.last_mode = "mock" if self.mock else "real"
         self.last_error: str | None = None
+        # Token/cost accounting — stays at 0 in mock mode (no round trips).
+        from prove_or_abstain.cost_tracker import CostTracker
+        self.tracker = CostTracker(self.model)
+
+    def _account(self, resp) -> None:
+        """Add a response's token usage to the cost tracker, if present."""
+        usage = getattr(resp, "usage", None)
+        if usage is not None:
+            self.tracker.add_usage(getattr(usage, "prompt_tokens", 0),
+                                   getattr(usage, "completion_tokens", 0))
 
     # --- low level: one raw chat call (lazy openai import) ---
     def complete(self, system: str, user: str,
@@ -81,7 +95,88 @@ class QwenClient:
                       {"role": "user", "content": user}],
             **kwargs,
         )
+        self._account(resp)
         return (resp.choices[0].message.content or "").strip()
+
+    # --- use 5: drive an agentic tool-calling loop (orchestrates, decides
+    # nothing). Qwen picks which tools to call; the tools run the exact same
+    # deterministic math as the graph, so the verdict stays LLM-independent. ---
+    def chat_with_tools(self, messages: list[dict], tools: list[dict],
+                        temperature: float = 0.1, max_tokens: int = 500) -> dict:
+        """One assistant turn with OpenAI-style function calling.
+
+        Returns a normalized dict:
+          {"message": <assistant message dict to append to history>,
+           "tool_calls": [{"id", "name", "arguments": <parsed dict>}, ...],
+           "content": <assistant text or "">}
+
+        Raises in mock mode — the agent loop drives deterministically offline
+        and never reaches here (see prove_or_abstain/agent_loop.py).
+        """
+        if self.mock:
+            raise RuntimeError("chat_with_tools() called in mock mode")
+        if self._client is None:
+            from openai import OpenAI
+            self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        resp = self._client.chat.completions.create(
+            model=self.model, temperature=temperature, max_tokens=max_tokens,
+            messages=messages, tools=tools, tool_choice="auto",
+        )
+        self._account(resp)
+        msg = resp.choices[0].message
+        calls = []
+        for tc in (msg.tool_calls or []):
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            calls.append({"id": tc.id, "name": tc.function.name, "arguments": args})
+        # Re-serialize the assistant turn so it can be appended to history.
+        assistant_msg: dict = {"role": "assistant", "content": msg.content or ""}
+        if calls:
+            assistant_msg["tool_calls"] = [
+                {"id": c["id"], "type": "function",
+                 "function": {"name": c["name"],
+                              "arguments": json.dumps(c["arguments"])}}
+                for c in calls
+            ]
+        return {"message": assistant_msg, "tool_calls": calls,
+                "content": msg.content or ""}
+
+    # --- resilience: recover JSON from a messy model reply, else fall back ---
+    def _robust_parse_json(self, text: str, fallback):
+        """Best-effort JSON recovery: (1) parse the fenced text; (2) parse the
+        substring between the outermost braces/brackets; (3) regex-extract the
+        known scalar fields; (4) give up and return `fallback`."""
+        s = _strip_fences(text or "")
+        try:
+            return json.loads(s)
+        except Exception:
+            pass
+        for open_c, close_c in (("{", "}"), ("[", "]")):
+            i, j = s.find(open_c), s.rfind(close_c)
+            if 0 <= i < j:
+                try:
+                    return json.loads(s[i:j + 1])
+                except Exception:
+                    pass
+        fields: dict = {}
+        m = re.search(r'verdict"?\s*[:=]\s*"?(ASSERT|ABSTAIN|NO_ANOMALY)', s, re.I)
+        if m:
+            fields["verdict"] = m.group(1).upper()
+        m = re.search(r'confidence"?\s*[:=]\s*([0-9]*\.?[0-9]+)', s, re.I)
+        if m:
+            try:
+                fields["confidence"] = float(m.group(1))
+            except ValueError:
+                pass
+        m = re.search(r'panel"?\s*[:=]\s*"?([a-zA-Z_]+)', s)
+        if m:
+            fields["panel"] = m.group(1)
+        m = re.search(r'metric"?\s*[:=]\s*"?([a-zA-Z_]+)', s)
+        if m:
+            fields["metric"] = m.group(1)
+        return fields or fallback
 
     # --- use 1: propose an exploration order (decides nothing) ---
     def plan_dimensions(self, metric: str, delta_rel: float, dims: list[str]) -> list[str]:
@@ -98,7 +193,9 @@ class QwenClient:
         user = json.dumps({"metric": metric, "delta_rel": round(delta_rel, 4),
                            "dimensions": list(dims)}, ensure_ascii=False)
         try:
-            order = json.loads(_strip_fences(self.complete(system, user, max_tokens=120)))
+            parsed = self._robust_parse_json(
+                self.complete(system, user, max_tokens=120), list(dims))
+            order = parsed if isinstance(parsed, list) else list(dims)
             order = [d for d in order if d in dims]          # guard: subset only
             order += [d for d in dims if d not in order]     # re-add anything dropped
             self.last_mode, self.last_error = "real", None
@@ -122,9 +219,10 @@ class QwenClient:
             "English, each phrased as a question."
         )
         try:
-            out = json.loads(_strip_fences(self.complete(system,
-                    json.dumps(payload, ensure_ascii=False), max_tokens=200)))
-            out = [s for s in out if isinstance(s, str)][:3]
+            parsed = self._robust_parse_json(self.complete(system,
+                    json.dumps(payload, ensure_ascii=False), max_tokens=200), [])
+            out = [s for s in parsed if isinstance(s, str)][:3] \
+                if isinstance(parsed, list) else []
             self.last_mode, self.last_error = "real", None
             return out or template_speculations(payload)
         except Exception as exc:
@@ -176,9 +274,11 @@ class QwenClient:
         user = json.dumps({"query": query, "panels": panels, "metrics": metrics},
                           ensure_ascii=False)
         try:
-            raw = json.loads(_strip_fences(self.complete(
+            raw = self._robust_parse_json(self.complete(
                 system, user, max_tokens=150,
-                response_format={"type": "json_object"})))
+                response_format={"type": "json_object"}), {})
+            if not isinstance(raw, dict):
+                raise ValueError("router did not return an object")
             panel = raw.get("panel")
             metric = raw.get("metric")
             if panel not in panels:

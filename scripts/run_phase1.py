@@ -1,5 +1,5 @@
 """
-run_phase1.py — runs the compiled graph on the two headline demo scenarios.
+scripts/run_phase1.py — runs the compiled graph on the two headline demo scenarios.
 
   CLEAN   (autopilot ON)  -> ASSERT segment=paid -> EXECUTE
   DIFFUSE (autopilot OFF) -> ABSTAIN -> ESCALATE
@@ -8,16 +8,22 @@ If DASHSCOPE_API_KEY is configured (via .env or export), Qwen is called for
 the exploration plan and the wording; otherwise the deterministic mock is
 used automatically.
 
-Run:  python run_phase1.py
+Run:  python scripts/run_phase1.py
 """
+import sys
+from pathlib import Path
+
+# Runnable both as `python scripts/x.py` and `python -m scripts.x`:
+# put the repo root on sys.path so `prove_or_abstain` and `scripts` resolve.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 try:
     from dotenv import load_dotenv
     load_dotenv()                    # reads .env -> os.environ (key never hardcoded)
 except ModuleNotFoundError:
     pass
 
-from graph import APP
-from panels import BASELINE, CLEAN, DIFFUSE
+from prove_or_abstain.graph import APP
+from prove_or_abstain.panels import BASELINE, CLEAN, DIFFUSE
 
 
 def initial_state(current, autopilot=False):

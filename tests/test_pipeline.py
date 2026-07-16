@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 
 os.environ["QWEN_MOCK"] = "1"   # before any import that instantiates the LLM client
+os.environ.setdefault("PROBATIO_DB", ":memory:")   # never touch disk in tests
 
 import numpy as np
 import pandas as pd
@@ -18,11 +19,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.app import app
-from attribution import decompose
-from attribution_reference import (BASELINE as REF_BASELINE, CLEAN as REF_CLEAN,
+from prove_or_abstain.attribution import decompose
+from scripts.attribution_reference import (BASELINE as REF_BASELINE, CLEAN as REF_CLEAN,
                                    DIFFUSE as REF_DIFFUSE, decompose as oracle)
-from gates import evaluate_gates
-from metrics import aggregate
+from prove_or_abstain.gates import evaluate_gates
+from prove_or_abstain.metrics import aggregate
 
 # Same MIXSHIFT as gate_check.py: n AND r both move -> rate, mix, interaction
 # all non-zero.
@@ -116,7 +117,7 @@ def _csv(df: pd.DataFrame) -> bytes:
 
 
 def test_upload_roundtrip_matches_panels():
-    from panels import BASELINE, CLEAN, DIFFUSE
+    from prove_or_abstain.panels import BASELINE, CLEAN, DIFFUSE
     for curr, want in [(CLEAN, "ASSERT"), (DIFFUSE, "ABSTAIN")]:
         r = client.post("/investigate/upload", files={
             "baseline": ("baseline.csv", _csv(BASELINE), "text/csv"),
@@ -128,7 +129,7 @@ def test_upload_roundtrip_matches_panels():
 
 
 def test_upload_clean_localizes_paid():
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
     body = client.post("/investigate/upload", files={
         "baseline": ("baseline.csv", _csv(BASELINE), "text/csv"),
         "current": ("current.csv", _csv(CLEAN), "text/csv"),
@@ -137,7 +138,7 @@ def test_upload_clean_localizes_paid():
 
 
 def test_upload_rejects_missing_column():
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
     r = client.post("/investigate/upload", files={
         "baseline": ("baseline.csv", _csv(BASELINE.drop(columns=["n"])), "text/csv"),
         "current": ("current.csv", _csv(CLEAN), "text/csv"),
@@ -147,7 +148,7 @@ def test_upload_rejects_missing_column():
 
 
 def test_upload_rejects_negative_counts():
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
     bad = BASELINE.copy()
     bad.loc[0, "n"] = -5
     r = client.post("/investigate/upload", files={
@@ -159,7 +160,7 @@ def test_upload_rejects_negative_counts():
 
 
 def test_upload_rejects_missing_values():
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
     bad = BASELINE.copy()
     bad.loc[0, "c"] = np.nan
     r = client.post("/investigate/upload", files={
@@ -174,7 +175,7 @@ def test_upload_rejects_c_over_n_on_rate_metric():
     # c > n makes no sense for a rate (successes out of n); it must be a
     # 400, not a silent nonsense verdict. Sum metrics stay exempt —
     # test_sum_metric_upload_asserts covers that (revenue has c >> n).
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
     bad = CLEAN.copy()
     bad.loc[0, "c"] = bad.loc[0, "n"] + 1
     r = client.post("/investigate/upload", files={
@@ -186,7 +187,7 @@ def test_upload_rejects_c_over_n_on_rate_metric():
 
 
 def test_upload_rejects_mismatched_columns():
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
     r = client.post("/investigate/upload", files={
         "baseline": ("baseline.csv", _csv(BASELINE), "text/csv"),
         "current": ("current.csv", _csv(CLEAN.rename(columns={"device": "browser"})), "text/csv"),
@@ -218,7 +219,7 @@ def test_significance_gate_passes_on_clean():
 
 # --------------------------------------------------------------- sum metrics
 def test_decompose_sum_exact():
-    from attribution import decompose_sum
+    from prove_or_abstain.attribution import decompose_sum
     base = pd.DataFrame([{"segment": "a", "n": 100, "c": 2000},
                          {"segment": "b", "n": 50, "c": 2500}])
     curr = pd.DataFrame([{"segment": "a", "n": 120, "c": 1800},
@@ -266,7 +267,7 @@ def test_abstain_has_no_drilldown():
 
 # ----------------------------------------------------------------- time series
 def test_series_endpoint_rolling_baseline():
-    from panels import make_series
+    from prove_or_abstain.panels import make_series
     r = client.post("/investigate/series", files={
         "series": ("series.csv", _csv(make_series()), "text/csv"),
     })
@@ -277,7 +278,7 @@ def test_series_endpoint_rolling_baseline():
 
 
 def test_series_window_limits_baseline():
-    from panels import make_series
+    from prove_or_abstain.panels import make_series
     r = client.post("/investigate/series",
                     files={"series": ("series.csv", _csv(make_series()), "text/csv")},
                     data={"window": "3"})
@@ -285,7 +286,7 @@ def test_series_window_limits_baseline():
 
 
 def test_series_rejects_bad_window():
-    from panels import make_series
+    from prove_or_abstain.panels import make_series
     r = client.post("/investigate/series",
                     files={"series": ("series.csv", _csv(make_series()), "text/csv")},
                     data={"window": "0"})
@@ -294,7 +295,7 @@ def test_series_rejects_bad_window():
 
 
 def test_series_requires_period_column():
-    from panels import BASELINE
+    from prove_or_abstain.panels import BASELINE
     r = client.post("/investigate/series", files={
         "series": ("series.csv", _csv(BASELINE), "text/csv"),
     })
@@ -351,7 +352,7 @@ def _sqlite_dsn(tmp_path, tables: dict) -> str:
 
 
 def test_sql_connector_matches_upload(tmp_path):
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
     dsn = _sqlite_dsn(tmp_path, {"baseline": BASELINE, "current": CLEAN})
     body = client.post("/investigate/sql", json={
         "dsn": dsn,
@@ -365,7 +366,7 @@ def test_sql_connector_matches_upload(tmp_path):
 
 def test_sql_connector_with_where_clause(tmp_path):
     # queries can reshape/filter as long as the result stays long-panel
-    from panels import BASELINE, DIFFUSE
+    from prove_or_abstain.panels import BASELINE, DIFFUSE
     dsn = _sqlite_dsn(tmp_path, {"baseline": BASELINE, "current": DIFFUSE})
     body = client.post("/investigate/sql", json={
         "dsn": dsn,
@@ -395,7 +396,7 @@ def test_sql_connector_rejects_stacked_statements(tmp_path):
 
 # ----------------------------------------------------------- Google Sheets
 def test_gsheets_url_normalization():
-    from connectors.gsheets import _to_csv_url
+    from prove_or_abstain.connectors.gsheets import _to_csv_url
 
     edit = "https://docs.google.com/spreadsheets/d/ABC123/edit#gid=42"
     assert _to_csv_url(edit) == "https://docs.google.com/spreadsheets/d/ABC123/export?format=csv&gid=42"
@@ -408,13 +409,13 @@ def test_gsheets_url_normalization():
 
 
 def test_gsheets_rejects_non_google_host():
-    from connectors.gsheets import SheetError, _to_csv_url
+    from prove_or_abstain.connectors.gsheets import SheetError, _to_csv_url
     with pytest.raises(SheetError):
         _to_csv_url("https://evil.example.com/spreadsheets/d/ABC123/edit")
 
 
 def test_gsheets_fetch_panel_mocked(monkeypatch):
-    from connectors import gsheets
+    from prove_or_abstain.connectors import gsheets
 
     class FakeResp:
         text = "metric,segment,n,c\nconversion,paid,100,7\n"
@@ -427,7 +428,7 @@ def test_gsheets_fetch_panel_mocked(monkeypatch):
 
 
 def test_gsheets_fetch_panel_rejects_private_sheet(monkeypatch):
-    from connectors import gsheets
+    from prove_or_abstain.connectors import gsheets
 
     class FakeResp:
         text = "<html>sign in</html>"
@@ -439,7 +440,7 @@ def test_gsheets_fetch_panel_rejects_private_sheet(monkeypatch):
 
 
 def test_sheets_endpoint_matches_upload(monkeypatch):
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
 
     def fake_fetch(url):
         return BASELINE if "baseline" in url else CLEAN
@@ -464,7 +465,7 @@ def test_sheets_endpoint_rejects_non_google_url():
 
 # --------------------------------------------------------------- panel data
 def test_panel_data_matches_source():
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
     body = client.get("/panels/clean").json()
     assert body["panel"] == "clean"
     assert len(body["baseline"]) == len(BASELINE)
@@ -477,7 +478,7 @@ def test_panel_data_rejects_unknown_panel():
 
 
 def test_upload_response_echoes_dataset():
-    from panels import BASELINE, CLEAN
+    from prove_or_abstain.panels import BASELINE, CLEAN
     r = client.post("/investigate/upload", files={
         "baseline": ("baseline.csv", _csv(BASELINE), "text/csv"),
         "current": ("current.csv", _csv(CLEAN), "text/csv"),
@@ -485,3 +486,312 @@ def test_upload_response_echoes_dataset():
     body = r.json()
     assert len(body["dataset"]["baseline"]) == len(BASELINE)
     assert len(body["dataset"]["current"]) == len(CLEAN)
+
+
+# ------------------------------------------------- agent mode (Qwen loop)
+# The agent mode lets Qwen orchestrate the investigation via tool calls. Its
+# whole promise is that the VERDICT is unchanged — Qwen drives the path, the
+# gates decide the outcome. These tests are the safety net for that claim.
+
+def test_agent_mode_matches_graph_on_every_panel():
+    # Same verdict, root cause, confidence and action as the fixed pipeline.
+    for panel in ("clean", "diffuse", "mixshift", "deep"):
+        g = client.post("/investigate", json={"panel": panel, "autopilot": True,
+                                              "mode": "graph"}).json()
+        a = client.post("/investigate", json={"panel": panel, "autopilot": True,
+                                              "mode": "agent"}).json()
+        assert a["verdict"] == g["verdict"], panel
+        assert a["root_cause"] == g["root_cause"], panel
+        assert a["action"]["kind"] == g["action"]["kind"], panel
+        assert a["confidence"] == pytest.approx(g["confidence"]), panel
+
+
+def test_agent_trace_present_only_in_agent_mode():
+    g = client.post("/investigate", json={"panel": "clean", "mode": "graph"}).json()
+    a = client.post("/investigate", json={"panel": "clean", "mode": "agent"}).json()
+    assert g["agent_trace"] == []
+    tools = [s["tool"] for s in a["agent_trace"]]
+    assert "test_dimension" in tools  # Qwen (mock driver) actually called a tool
+
+
+def test_agent_verdict_independent_of_llm_path():
+    # THE guarantee: whatever tool sequence Qwen chooses — reordering, skipping
+    # dimensions, or finalizing immediately without testing anything — the
+    # determinism guard yields the exact same verdict as the graph. A false
+    # ABSTAIN from a lazy LLM is impossible.
+    import json as _json
+    from prove_or_abstain.panels import BASELINE as PB, CLEAN as PC
+    from prove_or_abstain.llm import template_report, template_speculations
+    import prove_or_abstain.agent_loop as al
+
+    base = dict(baseline=PB, current=PC, metrics=["conversion", "activation"],
+                metric_kinds={}, dims=["device", "segment"],
+                autopilot_enabled=True, trace=[])
+    ref = client.post("/investigate",
+                      json={"panel": "clean", "autopilot": True}).json()
+
+    class _Stub:
+        def __init__(self, script):
+            self.mock = False; self.model = "stub"
+            self.last_mode = "real"; self.last_error = None
+            self._script = script; self._i = 0
+
+        def chat_with_tools(self, messages, tools, **kw):
+            step = self._script[self._i]; self._i += 1
+            calls = [{"id": f"c{i}", "name": n, "arguments": a}
+                     for i, (n, a) in enumerate(step)]
+            msg = {"role": "assistant", "content": "", "tool_calls": [
+                {"id": c["id"], "type": "function",
+                 "function": {"name": c["name"],
+                              "arguments": _json.dumps(c["arguments"])}}
+                for c in calls]}
+            return {"message": msg, "tool_calls": calls, "content": ""}
+
+        def speculate_causes(self, p): return template_speculations(p)
+        def write_report(self, p): return template_report(p)
+
+    scripts = {
+        "reverse": [[("test_dimension", {"dimension": "segment"})],
+                    [("test_dimension", {"dimension": "device"})], [("finalize", {})]],
+        "skip": [[("test_dimension", {"dimension": "segment"})], [("finalize", {})]],
+        "lazy": [[("finalize", {})]],
+        "garbage": [[("test_dimension", {"dimension": "nope"})], [("finalize", {})]],
+    }
+    orig = al.get_client
+    try:
+        for label, script in scripts.items():
+            al.get_client = lambda s=_Stub(script): s
+            out = al.investigate_agentic(dict(base))
+            assert out["verdict"] == ref["verdict"], label
+            assert out["winning_dim"] == ref["root_cause"]["dimension"], label
+            assert out["confidence"] == pytest.approx(ref["confidence"]), label
+    finally:
+        al.get_client = orig
+
+
+# ---------------------------------------------------- memory (SQLite) layer
+
+def test_memory_records_and_dedupes_alerts():
+    from prove_or_abstain import memory
+    memory.reset()
+    iid = memory.record_investigation("conversion", ["segment"], "ASSERT", 0.8,
+                                      "segment=paid", "r", ["t"], "agent", "qwen-plus")
+    assert memory.get_investigation(iid)["verdict"] == "ASSERT"
+    a1 = memory.create_alert(iid, "conversion", "segment=paid", "EXECUTE", "d")
+    a2 = memory.create_alert(iid, "conversion", "segment=paid", "EXECUTE", "d")
+    assert a1 == a2                                   # deduped: same metric×cause
+    assert len(memory.get_active_alerts()) == 1
+    assert memory.resolve_alert(a1) is True
+    assert memory.resolve_alert(a1) is False          # already resolved
+    assert len(memory.get_active_alerts()) == 0
+    stats = memory.get_stats()
+    assert stats["total_investigations"] == 1 and stats["asserts"] == 1
+
+
+def test_autopilot_adapter_survives_on_memory():
+    # The SQLite-backed adapter still produces the legacy Execution/Dashboard.
+    from prove_or_abstain import memory, autopilot
+    memory.reset()
+    autopilot.record_execution("conversion", "segment", "paid", 0.79,
+                               "EXECUTE", "pause", "report", ["t1"])
+    execs = autopilot.get_executions()
+    assert "conversion:segment=paid" in execs
+    dash = autopilot.get_dashboard()
+    assert dash.total_executions == 1
+    assert dash.active_alerts[0]["detail"] == "pause"
+
+
+# --------------------------------------------------------- benchmark harness
+
+def test_benchmark_high_accuracy_offline():
+    from prove_or_abstain.benchmark import build_scenarios, run_benchmark
+    assert len(build_scenarios()) == 30
+    for mode in ("graph", "agent"):
+        m = run_benchmark(mode, verbose=False)
+        assert m["n"] == 30
+        assert m["accuracy"] >= 0.9, [r for r in m["records"] if not r["correct"]]
+        assert m["false_abstain_rate"] == 0.0     # never miss a real cause
+        assert all("confidence" in r for r in m["records"])  # feeds calibration
+
+
+# ----------------------------------------------------- autonomous monitor
+
+def _run(coro):
+    import asyncio
+    return asyncio.new_event_loop().run_until_complete(coro)
+
+
+def test_monitor_detects_and_records():
+    from prove_or_abstain import memory
+    from prove_or_abstain.monitor import MetricMonitor
+    from prove_or_abstain.panels import BASELINE, CLEAN
+    memory.reset()
+    mon = MetricMonitor(sources=[{
+        "type": "inline", "config": {"baseline": BASELINE, "current": CLEAN},
+        "metrics": ["conversion", "activation"], "dims": ["device", "segment"]}])
+    out = _run(mon.check_once())
+    assert out[0]["verdict"] == "ASSERT" and out[0]["cause"] == "segment=paid"
+    assert len(memory.get_history()) == 1
+    assert len(memory.get_active_alerts()) == 1   # confident ASSERT -> alert
+
+
+def test_monitor_seeds_baseline_then_no_anomaly():
+    from prove_or_abstain import memory
+    from prove_or_abstain.monitor import MetricMonitor
+    from prove_or_abstain.panels import BASELINE
+    memory.reset()
+    # no inline baseline -> first cycle only seeds it, second sees no movement
+    mon = MetricMonitor(sources=[{
+        "type": "inline", "config": {"current": BASELINE},
+        "metrics": ["conversion"], "dims": ["device", "segment"]}])
+    first = _run(mon.check_once())
+    assert first[0]["verdict"] == "BASELINE_SET"
+    second = _run(mon.check_once())
+    assert second[0]["verdict"] == "NO_ANOMALY"
+
+
+def test_monitor_survives_bad_source():
+    from prove_or_abstain.monitor import MetricMonitor
+    mon = MetricMonitor(sources=[{
+        "type": "csv", "config": {"path": "/nonexistent/nope.csv"},
+        "metrics": ["conversion"], "dims": ["device"]}])
+    out = _run(mon.check_once())          # must not raise
+    assert "error" in out[0]
+
+
+# --------------------------------------------------- SSE streaming + fallback
+
+def test_sse_streams_events_in_order():
+    events = []
+    with client.stream("GET", "/investigate/stream?panel=clean&autopilot=true") as r:
+        assert r.status_code == 200
+        assert "text/event-stream" in r.headers["content-type"]
+        for line in r.iter_lines():
+            if line.startswith("event:"):
+                events.append(line.split(":", 1)[1].strip())
+    assert events[0] == "detector" and events[-1] == "done"
+    assert "gate_result" in events and "verdict" in events
+
+
+def test_agent_recovers_when_every_tool_errors(monkeypatch):
+    # item 8: even if every test_dimension tool call raises, the determinism
+    # sweep (which uses the math directly) still reaches the correct verdict.
+    import json as _json
+    import prove_or_abstain.agent_loop as al
+    from prove_or_abstain.panels import BASELINE as PB, CLEAN as PC
+    from prove_or_abstain.llm import template_report, template_speculations
+
+    ref = client.post("/investigate", json={"panel": "clean", "autopilot": True}).json()
+    monkeypatch.setattr(al, "_test_dimension",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    class _Stub:
+        mock = False; model = "stub"; last_mode = "real"; last_error = None
+        _script = [[("test_dimension", {"dimension": "device"})],
+                   [("test_dimension", {"dimension": "segment"})], [("finalize", {})]]
+        _i = 0
+
+        def chat_with_tools(self, messages, tools, **kw):
+            step = self._script[self._i]; self._i += 1
+            calls = [{"id": f"c{j}", "name": n, "arguments": a}
+                     for j, (n, a) in enumerate(step)]
+            msg = {"role": "assistant", "content": "", "tool_calls": [
+                {"id": c["id"], "type": "function",
+                 "function": {"name": c["name"], "arguments": _json.dumps(c["arguments"])}}
+                for c in calls]}
+            return {"message": msg, "tool_calls": calls, "content": ""}
+
+        def speculate_causes(self, p): return template_speculations(p)
+        def write_report(self, p): return template_report(p)
+
+    monkeypatch.setattr(al, "get_client", lambda: _Stub())
+    out = al.investigate_agentic(dict(baseline=PB, current=PC,
+        metrics=["conversion", "activation"], metric_kinds={},
+        dims=["device", "segment"], autopilot_enabled=True, trace=[]))
+    assert out["verdict"] == ref["verdict"]
+    assert out["winning_dim"] == ref["root_cause"]["dimension"]
+
+
+# ----------------------------------------------------------- cost tracking
+
+def test_cost_tracker_pricing():
+    from prove_or_abstain.cost_tracker import CostTracker
+    t = CostTracker("qwen-plus")
+    t.add_usage(1_000_000, 1_000_000)
+    assert t.cost_usd == pytest.approx(0.80 + 2.40)   # $/1M in + out
+    assert t.to_dict()["total_tokens"] == 2_000_000
+
+
+def test_api_reports_cost_zero_in_mock():
+    body = client.post("/investigate", json={"panel": "clean", "mode": "agent"}).json()
+    assert body["cost"]["usd"] == 0.0 and body["cost"]["tokens"] == 0
+
+
+# ------------------------------------------------------------- calibration
+
+def test_calibration_perfect_set_has_low_ece():
+    from prove_or_abstain.calibrate import calibrate_confidence
+    # 9/10 correct at confidence 0.9 => accuracy == confidence => ECE ~ 0
+    recs = [{"got": "ASSERT", "confidence": 0.9, "correct": i < 9} for i in range(10)]
+    cal = calibrate_confidence(recs)
+    assert cal["n"] == 10
+    assert cal["ece"] < 0.02
+
+
+def test_calibration_over_benchmark():
+    from prove_or_abstain.benchmark import run_benchmark
+    from prove_or_abstain.calibrate import calibrate_confidence
+    cal = calibrate_confidence(run_benchmark("agent", verbose=False)["records"])
+    assert cal["n"] > 0
+    assert 0.0 <= cal["ece"] <= 1.0
+    assert sum(b["count"] for b in cal["buckets"]) == cal["n"]
+
+
+# ---------------------------------------------------------- audit trail
+
+def _clean_state():
+    from prove_or_abstain.panels import BASELINE, CLEAN
+    return {"baseline": BASELINE, "current": CLEAN,
+            "metrics": ["conversion", "activation"], "metric_kinds": {},
+            "dims": ["device", "segment"], "autopilot_enabled": True, "trace": []}
+
+
+def test_audit_trail_has_gates_and_replays():
+    from prove_or_abstain.agent_loop import investigate_agentic
+    from prove_or_abstain.audit import create_audit_trail, verify_replay
+    st = _clean_state()
+    final = investigate_agentic(dict(st))
+    trail = create_audit_trail(final, final["reports_by_dim"],
+                               final["agent_trace"], final["llm"]["model"], "agent")
+    assert set(trail["gates"]) == {"material", "localized", "significant", "clean"}
+    assert trail["verdict"] == "ASSERT" and trail["cause"] == "segment=paid"
+    assert len(trail["input_hash"]) == 64                 # SHA256 hex
+    # a fresh run reproduces it exactly
+    assert verify_replay(trail, investigate_agentic(dict(st))) is True
+
+
+def test_audit_replay_detects_tampering():
+    from prove_or_abstain.agent_loop import investigate_agentic
+    from prove_or_abstain.audit import create_audit_trail, verify_replay
+    st = _clean_state()
+    final = investigate_agentic(dict(st))
+    trail = create_audit_trail(final, final["reports_by_dim"],
+                               final["agent_trace"], final["llm"]["model"], "agent")
+    trail["confidence"] = 0.123                            # tamper
+    assert verify_replay(trail, investigate_agentic(dict(st))) is False
+
+
+# ------------------------------------------------ robust JSON parsing (llm)
+
+def test_robust_parse_json_recovers_or_falls_back():
+    from prove_or_abstain.llm import QwenClient
+    c = QwenClient(mock=True)
+    assert c._robust_parse_json('["device","segment"]', None) == ["device", "segment"]
+    assert c._robust_parse_json("```json\n[\"a\",\"b\"]\n```", None) == ["a", "b"]
+    # JSON embedded in prose -> outermost-brace recovery
+    assert c._robust_parse_json('Here: {"panel":"clean"} done', None) == {"panel": "clean"}
+    # no valid JSON, but known fields -> regex recovery
+    got = c._robust_parse_json("verdict=ASSERT confidence: 0.83", "FB")
+    assert got == {"verdict": "ASSERT", "confidence": 0.83}
+    # total garbage -> fallback
+    assert c._robust_parse_json("no json here", "FB") == "FB"

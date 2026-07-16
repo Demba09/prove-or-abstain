@@ -220,6 +220,27 @@ details.trace summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 
 footer { color: var(--muted); font-size: 12.5px; margin-top: 26px; line-height: 1.7; }
 footer a { color: var(--accent-strong); }
+.advanced { margin-top: 0; font-size: 14px; }
+.advanced > summary { cursor: pointer; color: var(--muted); user-select: none; padding: 4px 0; }
+.advanced > summary:hover { color: var(--accent-strong); }
+.advanced-body { padding: 0 0 4px; }
+
+#dash-panel { display: none; }
+.dash-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.dash-header h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin: 0; }
+.dash-stats { display: flex; gap: 20px; font-size: 13px; color: var(--muted); flex-wrap: wrap; margin-bottom: 16px; }
+.dash-stats .stat { text-align: center; }
+.dash-stats .stat b { display: block; font-size: 19px; color: var(--ink); }
+.dash-alert { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.dash-alert.active { border-color: var(--abstain); background: var(--abstain-bg); }
+.dash-alert.resolved { opacity: .6; }
+.dash-alert .info { flex: 1; min-width: 200px; }
+.dash-alert .info .cause { font-weight: 600; color: var(--ink); }
+.dash-alert .info .meta { font-size: 12.5px; color: var(--muted); }
+.dash-alert .resolve-btn { font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 6px; cursor: pointer; border: 1px solid var(--accent); background: var(--card); color: var(--accent); }
+.dash-alert .resolve-btn:hover { background: var(--accent); color: #fff; }
+.dash-alert .resolved-tag { font-size: 12px; color: var(--assert); font-weight: 600; }
+.dash-empty { color: var(--muted); font-size: 13.5px; padding: 8px 0; }
 </style>
 </head>
 <body>
@@ -227,7 +248,7 @@ footer a { color: var(--accent-strong); }
   <header class="top">
     <h1>prove&#8209;or&#8209;abstain</h1>
   </header>
-  <p class="sub">A causal investigation agent that asserts a root cause only when the math proves it — and abstains otherwise.</p>
+  <p class="sub">An AI agent that investigates metric changes. It acts when the data proves a cause — and refuses to guess otherwise.</p>
 
   <div class="panel">
     <fieldset>
@@ -261,52 +282,59 @@ footer a { color: var(--accent-strong); }
 
     <div class="divider"></div>
 
-    <p class="eyebrow">Or investigate your own data</p>
-    <div class="upload-row">
-      <div class="field">
-        <label class="field-label" for="baseline">Baseline CSV — columns: <code>metric, &lt;dimensions...&gt;, n, c</code></label>
-        <input type="file" id="baseline" accept=".csv">
-      </div>
-      <div class="field">
-        <label class="field-label" for="current">Current CSV — same columns (see <code>examples/</code>)</label>
-        <input type="file" id="current" accept=".csv">
-      </div>
-      <button class="secondary" type="button" id="uploadBtn">investigate CSV</button>
-    </div>
+    <details class="advanced" id="advancedToggle">
+      <summary>Advanced — bring your own data (CSV, SQL, Google Sheets)</summary>
+      <div class="advanced-body">
 
-    <div class="divider"></div>
+        <p class="eyebrow" style="margin-top:8px;">Upload CSVs</p>
+        <div class="upload-row">
+          <div class="field">
+            <label class="field-label" for="baseline">Baseline — columns: <code>metric, &lt;dimensions...&gt;, n, c</code></label>
+            <input type="file" id="baseline" accept=".csv">
+          </div>
+          <div class="field">
+            <label class="field-label" for="current">Current — same columns (see <code>examples/</code>)</label>
+            <input type="file" id="current" accept=".csv">
+          </div>
+          <button class="secondary" type="button" id="uploadBtn">investigate CSV</button>
+        </div>
 
-    <p class="eyebrow">Or query a live database</p>
-    <div class="field">
-      <label class="field-label" for="dsn">Connection string — your own credentials, read-only queries only</label>
-      <input type="text" id="dsn" placeholder="postgresql://user:pass@host/db or sqlite:///demo.db">
-    </div>
-    <div class="upload-row" style="margin-top:10px;">
-      <div class="field">
-        <label class="field-label" for="baselineQuery">Baseline query — a single SELECT, long-panel columns</label>
-        <textarea id="baselineQuery" rows="2" placeholder="SELECT metric, segment, device, n, c FROM conversions WHERE period = 'last_month'"></textarea>
-      </div>
-      <div class="field">
-        <label class="field-label" for="currentQuery">Current query — same shape</label>
-        <textarea id="currentQuery" rows="2" placeholder="SELECT metric, segment, device, n, c FROM conversions WHERE period = 'this_month'"></textarea>
-      </div>
-      <button class="secondary" type="button" id="sqlBtn">investigate SQL</button>
-    </div>
+        <div class="divider"></div>
 
-    <div class="divider"></div>
+        <p class="eyebrow">Query a live database</p>
+        <div class="field">
+          <label class="field-label" for="dsn">Connection string — your own credentials, read-only queries only</label>
+          <input type="text" id="dsn" placeholder="postgresql://user:pass@host/db or sqlite:///demo.db">
+        </div>
+        <div class="upload-row" style="margin-top:10px;">
+          <div class="field">
+            <label class="field-label" for="baselineQuery">Baseline query — a single SELECT, long-panel columns</label>
+            <textarea id="baselineQuery" rows="2" placeholder="SELECT metric, segment, device, n, c FROM conversions WHERE period = 'last_month'"></textarea>
+          </div>
+          <div class="field">
+            <label class="field-label" for="currentQuery">Current query — same shape</label>
+            <textarea id="currentQuery" rows="2" placeholder="SELECT metric, segment, device, n, c FROM conversions WHERE period = 'this_month'"></textarea>
+          </div>
+          <button class="secondary" type="button" id="sqlBtn">investigate SQL</button>
+        </div>
 
-    <p class="eyebrow">Or read from Google Sheets</p>
-    <div class="upload-row">
-      <div class="field">
-        <label class="field-label" for="baselineSheet">Baseline sheet URL — shared as "anyone with the link"</label>
-        <input type="text" id="baselineSheet" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0">
+        <div class="divider"></div>
+
+        <p class="eyebrow">Read from Google Sheets</p>
+        <div class="upload-row">
+          <div class="field">
+            <label class="field-label" for="baselineSheet">Baseline sheet URL — shared as "anyone with the link"</label>
+            <input type="text" id="baselineSheet" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0">
+          </div>
+          <div class="field">
+            <label class="field-label" for="currentSheet">Current sheet URL — same long-panel columns</label>
+            <input type="text" id="currentSheet" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0">
+          </div>
+          <button class="secondary" type="button" id="sheetsBtn">investigate sheets</button>
+        </div>
+
       </div>
-      <div class="field">
-        <label class="field-label" for="currentSheet">Current sheet URL — same long-panel columns</label>
-        <input type="text" id="currentSheet" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0">
-      </div>
-      <button class="secondary" type="button" id="sheetsBtn">investigate sheets</button>
-    </div>
+    </details>
 
     <p id="error" role="alert"></p>
   </div>
@@ -348,6 +376,16 @@ footer a { color: var(--accent-strong); }
       <summary>investigation trace</summary>
       <ol class="trace-log" id="trace"></ol>
     </details>
+  </div>
+
+  <div class="panel" id="dash-panel">
+    <div class="dash-header">
+      <h2>Autopilot Dashboard</h2>
+      <button class="secondary" type="button" id="dash-check-btn" onclick="runAutonomousCheck()">run autonomous check</button>
+    </div>
+    <div class="dash-stats" id="dash-stats"></div>
+    <div id="dash-alerts"></div>
+    <div class="dash-empty" id="dash-empty">Loading&hellip;</div>
   </div>
 
   <footer>
@@ -450,8 +488,8 @@ function render(b) {
   if (b.routing) {
     setActiveTab(b.panel);
     $('routing').style.display = 'block';
-    $('routing').innerHTML = `routed to panel <b>${b.panel}</b>` +
-      (b.routing.metric ? ` · metric <b>${b.routing.metric}</b>` : '') +
+    $('routing').textContent = `routed to panel ${b.panel}` +
+      (b.routing.metric ? ` · metric ${b.routing.metric}` : '') +
       (b.routing.reason ? ` — ${b.routing.reason}` : '');
   } else {
     $('routing').style.display = 'none';
@@ -477,8 +515,8 @@ function render(b) {
     el.innerHTML =
       `<h3><span class="dim">dimension: ${dim}</span><span class="chip ${g.verdict.toLowerCase()}">${g.verdict}</span></h3>
        <ul>${g.reasons.map(r => `<li>${r}</li>`).join('')}</ul>
-       <div class="data-row">leader <span>${g.leading_segment ?? '—'}</span> concentration <span>${g.concentration.toFixed(2)}</span>
-         interaction <span>${g.interaction_share.toFixed(2)}</span> n <span>${g.leading_sample_n ?? '—'}</span>${pval}</div>`;
+       <div class="data-row">leader <span>${g.leading_segment ?? '—'}</span> share <span>${g.concentration.toFixed(2)}</span>
+          entanglement <span>${g.interaction_share.toFixed(2)}</span> users <span>${g.leading_sample_n ?? '—'}</span>${pval}</div>`;
     exhibits.appendChild(el);
   }
 
@@ -487,18 +525,18 @@ function render(b) {
   if (d) {
     const parent = `${d.parent.dim} = ${d.parent.segment}`;
     $('drilldown').innerHTML = d.refined
-      ? `drill-down: within <b>${parent}</b>, the cause narrows to <b>${d.refined.dim} = ${d.refined.segment}</b> (concentration ${d.refined.concentration.toFixed(2)})`
+      ? `drill-down: within <b>${parent}</b>, the cause narrows to <b>${d.refined.dim} = ${d.refined.segment}</b> (share ${d.refined.concentration.toFixed(2)})`
       : `drill-down: within <b>${parent}</b>, no sub-dimension localizes further — the whole segment is affected`;
   }
 
   $('action').style.display = b.action ? 'block' : 'none';
-  if (b.action) $('action').innerHTML = `<span class="kind">${b.action.kind}</span>${b.action.detail}`;
+  if (b.action) $('action').textContent = `${b.action.kind} — ${b.action.detail}`;
 
   $('report').style.display = b.report ? 'block' : 'none';
   if (b.report) {
     let html = b.report;
-    if (b.llm) html += `<span class="llm-tag">[${b.llm.mode === 'real' ? 'Qwen: ' + b.llm.model : b.llm.mode}]</span>`;
-    $('report').innerHTML = html;
+    if (b.llm) html += ` [${b.llm.mode === 'real' ? 'Qwen: ' + b.llm.model : b.llm.mode}]`;
+    $('report').textContent = html;
   }
 
   const specs = b.speculations || [];
@@ -631,6 +669,105 @@ $('query').addEventListener('keydown', e => { if (e.key === 'Enter') runQuery();
 $('uploadBtn').addEventListener('click', runUpload);
 $('sqlBtn').addEventListener('click', runSql);
 $('sheetsBtn').addEventListener('click', runSheets);
+
+// ---------------------------------------------------------------- dashboard
+async function loadDashboard() {
+  try {
+    const r = await fetch('/dashboard');
+    if (!r.ok) return;
+    const d = await r.json();
+    renderDashboard(d);
+  } catch { /* dashboard is optional — don't break the main UI */ }
+}
+
+function renderDashboard(d) {
+  $('dash-panel').style.display = 'block';
+
+  const stats = $('dash-stats');
+  const lastCheck = d.last_check_at ? new Date(d.last_check_at * 1000).toLocaleTimeString() : 'never';
+  const uptimeMin = Math.floor(d.uptime_seconds / 60);
+  stats.innerHTML =
+    `<div class="stat"><b>${d.total_checks}</b>checks</div>
+     <div class="stat"><b>${d.total_executions}</b>executions</div>
+     <div class="stat"><b>${d.active_alerts.filter(a => !a.resolved).length}</b>active alerts</div>
+     <div class="stat"><b>${lastCheck}</b>last check</div>
+     <div class="stat"><b>${uptimeMin}m</b>uptime</div>`;
+
+  const alerts = $('dash-alerts');
+  alerts.innerHTML = '';
+  const empty = $('dash-empty');
+
+  if (!d.active_alerts.length) {
+    empty.textContent = 'No alerts yet — run an autonomous check or investigate a scenario with autopilot ON.';
+    empty.style.display = 'block';
+    return;
+  }
+
+  empty.style.display = 'none';
+  d.active_alerts.sort((a, b) => b.created_at - a.created_at).forEach(a => {
+    const el = document.createElement('div');
+    el.className = 'dash-alert ' + (a.resolved ? 'resolved' : 'active');
+    const time = new Date(a.created_at * 1000).toLocaleString();
+
+    const info = document.createElement('div');
+    info.className = 'info';
+    const cause = document.createElement('div');
+    cause.className = 'cause';
+    cause.textContent = a.id;
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.textContent = a.detail + ' · ' + time;
+    info.appendChild(cause);
+    info.appendChild(meta);
+    el.appendChild(info);
+
+    if (a.resolved) {
+      const tag = document.createElement('span');
+      tag.className = 'resolved-tag';
+      tag.textContent = 'resolved by ' + (a.resolved_by || 'human');
+      el.appendChild(tag);
+    } else {
+      const btn = document.createElement('button');
+      btn.className = 'resolve-btn';
+      btn.textContent = 'resolve';
+      btn.onclick = function() { resolveAlert(a.id); };
+      el.appendChild(btn);
+    }
+    alerts.appendChild(el);
+  });
+}
+
+async function resolveAlert(id) {
+  try {
+    const r = await fetch('/executions/' + encodeURIComponent(id) + '/resolve', {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({id, resolved_by: 'human'}),
+    });
+    if (r.ok) loadDashboard();
+  } catch { fail('Could not resolve alert.'); }
+}
+
+async function runAutonomousCheck() {
+  clearFail();
+  setBusy(true);
+  try {
+    const r = await fetch('/investigate/check', {method: 'POST'});
+    const body = await r.json();
+    if (!r.ok) throw new Error(body.detail || r.statusText);
+    alert('Autonomous check complete: ' + body.verdict + '\n' +
+      body.panels.map(p => '  ' + p.panel + ' → ' + p.verdict + ' (' + p.action.kind + ')').join('\n'));
+    loadDashboard();
+  } catch (e) {
+    fail(e.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+// load dashboard on page load + refresh every 30s
+loadDashboard();
+setInterval(loadDashboard, 30000);
 </script>
 </body>
 </html>

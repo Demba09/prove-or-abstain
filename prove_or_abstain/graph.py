@@ -31,8 +31,8 @@ ONLY coupling point to the framework.
 from __future__ import annotations
 from langgraph.graph import StateGraph, START, END
 
-from agent_state import AgentState
-from nodes import (detector, route_after_detect,
+from prove_or_abstain.agent_state import AgentState
+from prove_or_abstain.nodes import (detector, route_after_detect,
                    hypothesizer, investigator,
                    verifier, route_after_verify,
                    driller, actuator, reporter)
