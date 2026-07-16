@@ -599,3 +599,16 @@ def test_autopilot_adapter_survives_on_memory():
     dash = autopilot.get_dashboard()
     assert dash.total_executions == 1
     assert dash.active_alerts[0]["detail"] == "pause"
+
+
+# --------------------------------------------------------- benchmark harness
+
+def test_benchmark_high_accuracy_offline():
+    from prove_or_abstain.benchmark import build_scenarios, run_benchmark
+    assert len(build_scenarios()) == 30
+    for mode in ("graph", "agent"):
+        m = run_benchmark(mode, verbose=False)
+        assert m["n"] == 30
+        assert m["accuracy"] >= 0.9, [r for r in m["records"] if not r["correct"]]
+        assert m["false_abstain_rate"] == 0.0     # never miss a real cause
+        assert all("confidence" in r for r in m["records"])  # feeds calibration
