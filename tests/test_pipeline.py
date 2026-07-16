@@ -745,3 +745,37 @@ def test_calibration_over_benchmark():
     assert cal["n"] > 0
     assert 0.0 <= cal["ece"] <= 1.0
     assert sum(b["count"] for b in cal["buckets"]) == cal["n"]
+
+
+# ---------------------------------------------------------- audit trail
+
+def _clean_state():
+    from prove_or_abstain.panels import BASELINE, CLEAN
+    return {"baseline": BASELINE, "current": CLEAN,
+            "metrics": ["conversion", "activation"], "metric_kinds": {},
+            "dims": ["device", "segment"], "autopilot_enabled": True, "trace": []}
+
+
+def test_audit_trail_has_gates_and_replays():
+    from prove_or_abstain.agent_loop import investigate_agentic
+    from prove_or_abstain.audit import create_audit_trail, verify_replay
+    st = _clean_state()
+    final = investigate_agentic(dict(st))
+    trail = create_audit_trail(final, final["reports_by_dim"],
+                               final["agent_trace"], final["llm"]["model"], "agent")
+    assert set(trail["gates"]) == {"material", "localized", "significant", "clean"}
+    assert trail["verdict"] == "ASSERT" and trail["cause"] == "segment=paid"
+    assert len(trail["input_hash"]) == 64                 # SHA256 hex
+    # a fresh run reproduces it exactly
+    assert verify_replay(trail, investigate_agentic(dict(st))) is True
+
+
+def test_audit_replay_detects_tampering():
+    from prove_or_abstain.agent_loop import investigate_agentic
+    from prove_or_abstain.audit import create_audit_trail, verify_replay
+    st = _clean_state()
+    final = investigate_agentic(dict(st))
+    trail = create_audit_trail(final, final["reports_by_dim"],
+                               final["agent_trace"], final["llm"]["model"], "agent")
+    trail["confidence"] = 0.123                            # tamper
+    assert verify_replay(trail, investigate_agentic(dict(st))) is False
