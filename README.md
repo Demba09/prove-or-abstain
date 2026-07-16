@@ -107,6 +107,24 @@ does three things only: suggests the order of dimensions, writes the report from
 figures, and — on ASSERT — offers business hypotheses explicitly labelled as speculation.
 It never produces a number and never decides a verdict.
 
+### Two orchestration modes
+
+`POST /investigate` accepts `"mode": "graph"` (default) or `"mode": "agent"`:
+
+- **graph** — the fixed LangGraph state machine above.
+- **agent** — Qwen becomes the lead investigator. Instead of a hardcoded loop,
+  it calls tools (`test_dimension`, `drill`, `finalize`) via OpenAI-style
+  function calling and decides which dimension to test, in what order, and when
+  to stop. The response carries an `agent_trace` of every tool call it made.
+
+Crucially, **both modes return the identical verdict.** The tools run the same
+gate math, and a determinism guard guarantees the LLM can never change the
+outcome — if Qwen skips a dimension or finalizes early, every untested
+dimension is checked deterministically before concluding, so a lazy or
+divergent model can never cause a false ABSTAIN. Qwen drives the *path*; the
+math decides the *verdict*. Offline (`QWEN_MOCK=1` or no key), the loop is
+replayed deterministically and reproduces the graph exactly.
+
 ## Verification gates
 
 `ASSERT` requires all four gates to pass. A failed gate produces an `ABSTAIN` with the
@@ -138,7 +156,8 @@ prove_or_abstain/   core package — the deterministic pipeline
   gates.py            the 4 verification gates + confidence score
   nodes.py            detector → hypothesizer → investigator → verifier → …
   graph.py            the compiled LangGraph state machine
-  llm.py              the Qwen boundary (mock mode, routing, wording)
+  agent_loop.py       Qwen-orchestrated alternative (mode="agent")
+  llm.py              the Qwen boundary (mock mode, routing, wording, tools)
   panels.py           built-in demo scenarios
   autopilot.py        execution tracker + monitoring dashboard state
   webhook.py          outbound notifications on EXECUTE
@@ -190,7 +209,7 @@ python scripts/check_qwen.py        # is my DashScope key/endpoint alive?
 
 ```
 GET  /                     demo page
-POST /investigate          built-in scenario: { "panel": "clean" | "diffuse" | "mixshift" | "deep", "autopilot": false }
+POST /investigate          built-in scenario: { "panel": "clean" | "diffuse" | "mixshift" | "deep", "autopilot": false, "mode": "graph" | "agent" }
 POST /investigate/query    natural language: { "query": "why did conversion drop?" }
 POST /investigate/upload   CSV upload (multipart: baseline + current)
 POST /investigate/sql      live database: { "dsn": "...", "baseline_query": "...", "current_query": "..." }

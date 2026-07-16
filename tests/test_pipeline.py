@@ -485,3 +485,84 @@ def test_upload_response_echoes_dataset():
     body = r.json()
     assert len(body["dataset"]["baseline"]) == len(BASELINE)
     assert len(body["dataset"]["current"]) == len(CLEAN)
+
+
+# ------------------------------------------------- agent mode (Qwen loop)
+# The agent mode lets Qwen orchestrate the investigation via tool calls. Its
+# whole promise is that the VERDICT is unchanged — Qwen drives the path, the
+# gates decide the outcome. These tests are the safety net for that claim.
+
+def test_agent_mode_matches_graph_on_every_panel():
+    # Same verdict, root cause, confidence and action as the fixed pipeline.
+    for panel in ("clean", "diffuse", "mixshift", "deep"):
+        g = client.post("/investigate", json={"panel": panel, "autopilot": True,
+                                              "mode": "graph"}).json()
+        a = client.post("/investigate", json={"panel": panel, "autopilot": True,
+                                              "mode": "agent"}).json()
+        assert a["verdict"] == g["verdict"], panel
+        assert a["root_cause"] == g["root_cause"], panel
+        assert a["action"]["kind"] == g["action"]["kind"], panel
+        assert a["confidence"] == pytest.approx(g["confidence"]), panel
+
+
+def test_agent_trace_present_only_in_agent_mode():
+    g = client.post("/investigate", json={"panel": "clean", "mode": "graph"}).json()
+    a = client.post("/investigate", json={"panel": "clean", "mode": "agent"}).json()
+    assert g["agent_trace"] == []
+    tools = [s["tool"] for s in a["agent_trace"]]
+    assert "test_dimension" in tools  # Qwen (mock driver) actually called a tool
+
+
+def test_agent_verdict_independent_of_llm_path():
+    # THE guarantee: whatever tool sequence Qwen chooses — reordering, skipping
+    # dimensions, or finalizing immediately without testing anything — the
+    # determinism guard yields the exact same verdict as the graph. A false
+    # ABSTAIN from a lazy LLM is impossible.
+    import json as _json
+    from prove_or_abstain.panels import BASELINE as PB, CLEAN as PC
+    from prove_or_abstain.llm import template_report, template_speculations
+    import prove_or_abstain.agent_loop as al
+
+    base = dict(baseline=PB, current=PC, metrics=["conversion", "activation"],
+                metric_kinds={}, dims=["device", "segment"],
+                autopilot_enabled=True, trace=[])
+    ref = client.post("/investigate",
+                      json={"panel": "clean", "autopilot": True}).json()
+
+    class _Stub:
+        def __init__(self, script):
+            self.mock = False; self.model = "stub"
+            self.last_mode = "real"; self.last_error = None
+            self._script = script; self._i = 0
+
+        def chat_with_tools(self, messages, tools, **kw):
+            step = self._script[self._i]; self._i += 1
+            calls = [{"id": f"c{i}", "name": n, "arguments": a}
+                     for i, (n, a) in enumerate(step)]
+            msg = {"role": "assistant", "content": "", "tool_calls": [
+                {"id": c["id"], "type": "function",
+                 "function": {"name": c["name"],
+                              "arguments": _json.dumps(c["arguments"])}}
+                for c in calls]}
+            return {"message": msg, "tool_calls": calls, "content": ""}
+
+        def speculate_causes(self, p): return template_speculations(p)
+        def write_report(self, p): return template_report(p)
+
+    scripts = {
+        "reverse": [[("test_dimension", {"dimension": "segment"})],
+                    [("test_dimension", {"dimension": "device"})], [("finalize", {})]],
+        "skip": [[("test_dimension", {"dimension": "segment"})], [("finalize", {})]],
+        "lazy": [[("finalize", {})]],
+        "garbage": [[("test_dimension", {"dimension": "nope"})], [("finalize", {})]],
+    }
+    orig = al.get_client
+    try:
+        for label, script in scripts.items():
+            al.get_client = lambda s=_Stub(script): s
+            out = al.investigate_agentic(dict(base))
+            assert out["verdict"] == ref["verdict"], label
+            assert out["winning_dim"] == ref["root_cause"]["dimension"], label
+            assert out["confidence"] == pytest.approx(ref["confidence"]), label
+    finally:
+        al.get_client = orig

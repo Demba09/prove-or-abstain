@@ -76,3 +76,4 @@ class AgentState(TypedDict, total=False):
     speculations: list[str]         # LLM business hypotheses, labelled speculation
     llm: dict                       # {"model": ..., "mode": "mock"|"real"|"fallback"}
     trace: list[str]                # readable investigation log
+    agent_trace: list[dict]         # Qwen's tool-calling steps (agent mode only)

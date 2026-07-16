@@ -13,6 +13,10 @@ decides no verdict. It does exactly four things:
   - route_query()     : map a free-text question to one of the built-in
     panels/metrics. It only SELECTS among options the caller supplies —
     it cannot invent a panel or metric that doesn't exist.
+  - chat_with_tools() : ORCHESTRATE an investigation via tool calls. Qwen
+    chooses which dimensions to test and when to stop; the tools run the
+    same deterministic math, and the verdict is recomputed from the gate
+    reports afterwards — so Qwen drives the path, never the outcome.
 
 Mock mode: if DASHSCOPE_API_KEY is absent or QWEN_MOCK=1, no network call is
 made and deterministic outputs are returned — the pipeline runs offline.
@@ -82,6 +86,50 @@ class QwenClient:
             **kwargs,
         )
         return (resp.choices[0].message.content or "").strip()
+
+    # --- use 5: drive an agentic tool-calling loop (orchestrates, decides
+    # nothing). Qwen picks which tools to call; the tools run the exact same
+    # deterministic math as the graph, so the verdict stays LLM-independent. ---
+    def chat_with_tools(self, messages: list[dict], tools: list[dict],
+                        temperature: float = 0.1, max_tokens: int = 500) -> dict:
+        """One assistant turn with OpenAI-style function calling.
+
+        Returns a normalized dict:
+          {"message": <assistant message dict to append to history>,
+           "tool_calls": [{"id", "name", "arguments": <parsed dict>}, ...],
+           "content": <assistant text or "">}
+
+        Raises in mock mode — the agent loop drives deterministically offline
+        and never reaches here (see prove_or_abstain/agent_loop.py).
+        """
+        if self.mock:
+            raise RuntimeError("chat_with_tools() called in mock mode")
+        if self._client is None:
+            from openai import OpenAI
+            self._client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+        resp = self._client.chat.completions.create(
+            model=self.model, temperature=temperature, max_tokens=max_tokens,
+            messages=messages, tools=tools, tool_choice="auto",
+        )
+        msg = resp.choices[0].message
+        calls = []
+        for tc in (msg.tool_calls or []):
+            try:
+                args = json.loads(tc.function.arguments or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            calls.append({"id": tc.id, "name": tc.function.name, "arguments": args})
+        # Re-serialize the assistant turn so it can be appended to history.
+        assistant_msg: dict = {"role": "assistant", "content": msg.content or ""}
+        if calls:
+            assistant_msg["tool_calls"] = [
+                {"id": c["id"], "type": "function",
+                 "function": {"name": c["name"],
+                              "arguments": json.dumps(c["arguments"])}}
+                for c in calls
+            ]
+        return {"message": assistant_msg, "tool_calls": calls,
+                "content": msg.content or ""}
 
     # --- use 1: propose an exploration order (decides nothing) ---
     def plan_dimensions(self, metric: str, delta_rel: float, dims: list[str]) -> list[str]:

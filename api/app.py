@@ -40,6 +40,7 @@ from prove_or_abstain.webhook import notify
 from prove_or_abstain.connectors.gsheets import SheetError
 from prove_or_abstain.connectors.gsheets import fetch_panel as fetch_sheet_panel
 from prove_or_abstain.connectors.sql import SqlQueryError, fetch_panel as fetch_sql_panel
+from prove_or_abstain.agent_loop import investigate_agentic
 from prove_or_abstain.graph import APP as INVESTIGATION_GRAPH
 from prove_or_abstain.llm import get_client
 from prove_or_abstain.panels import BASELINE, CLEAN, DEEP, DIFFUSE, MIXSHIFT, split_series
@@ -71,6 +72,9 @@ _RESERVED = _REQUIRED | {"period"}           # non-dimension columns
 class InvestigateRequest(BaseModel):
     panel: Literal["clean", "diffuse", "mixshift", "deep"] = "clean"
     autopilot: bool = False   # only takes effect on ASSERT + confidence >= 0.70
+    # "graph": the fixed LangGraph pipeline. "agent": Qwen orchestrates the
+    # investigation via tool calls (the verdict is identical either way).
+    mode: Literal["graph", "agent"] = "graph"
 
 
 class QueryRequest(BaseModel):
@@ -110,7 +114,8 @@ def _jsonable(v):
 def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
                        metrics: list[str], dims: list[str],
                        autopilot: bool,
-                       metric_kinds: dict | None = None) -> dict:
+                       metric_kinds: dict | None = None,
+                       mode: str = "graph") -> dict:
     state = {
         "baseline": baseline,
         "current": current,
@@ -120,7 +125,9 @@ def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
         "autopilot_enabled": autopilot,
         "trace": [],
     }
-    final = INVESTIGATION_GRAPH.invoke(state)
+    # Both paths produce the same verdict; "agent" adds Qwen's tool-call trace.
+    final = investigate_agentic(state) if mode == "agent" \
+        else INVESTIGATION_GRAPH.invoke(state)
 
     win = final.get("winning_report")
     drill = final.get("drilldown")
@@ -159,6 +166,7 @@ def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
         "speculations": final.get("speculations", []),
         "llm": final.get("llm"),
         "trace": final.get("trace", []),
+        "agent_trace": final.get("agent_trace", []),
     })
 
 
@@ -205,6 +213,7 @@ def investigate(req: InvestigateRequest) -> dict:
         metrics=_METRICS,
         dims=["device", "segment"],
         autopilot=req.autopilot,
+        mode=req.mode,
     )
     return {"panel": req.panel, **result}
 
