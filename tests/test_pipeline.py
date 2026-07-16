@@ -612,3 +612,48 @@ def test_benchmark_high_accuracy_offline():
         assert m["accuracy"] >= 0.9, [r for r in m["records"] if not r["correct"]]
         assert m["false_abstain_rate"] == 0.0     # never miss a real cause
         assert all("confidence" in r for r in m["records"])  # feeds calibration
+
+
+# ----------------------------------------------------- autonomous monitor
+
+def _run(coro):
+    import asyncio
+    return asyncio.new_event_loop().run_until_complete(coro)
+
+
+def test_monitor_detects_and_records():
+    from prove_or_abstain import memory
+    from prove_or_abstain.monitor import MetricMonitor
+    from prove_or_abstain.panels import BASELINE, CLEAN
+    memory.reset()
+    mon = MetricMonitor(sources=[{
+        "type": "inline", "config": {"baseline": BASELINE, "current": CLEAN},
+        "metrics": ["conversion", "activation"], "dims": ["device", "segment"]}])
+    out = _run(mon.check_once())
+    assert out[0]["verdict"] == "ASSERT" and out[0]["cause"] == "segment=paid"
+    assert len(memory.get_history()) == 1
+    assert len(memory.get_active_alerts()) == 1   # confident ASSERT -> alert
+
+
+def test_monitor_seeds_baseline_then_no_anomaly():
+    from prove_or_abstain import memory
+    from prove_or_abstain.monitor import MetricMonitor
+    from prove_or_abstain.panels import BASELINE
+    memory.reset()
+    # no inline baseline -> first cycle only seeds it, second sees no movement
+    mon = MetricMonitor(sources=[{
+        "type": "inline", "config": {"current": BASELINE},
+        "metrics": ["conversion"], "dims": ["device", "segment"]}])
+    first = _run(mon.check_once())
+    assert first[0]["verdict"] == "BASELINE_SET"
+    second = _run(mon.check_once())
+    assert second[0]["verdict"] == "NO_ANOMALY"
+
+
+def test_monitor_survives_bad_source():
+    from prove_or_abstain.monitor import MetricMonitor
+    mon = MetricMonitor(sources=[{
+        "type": "csv", "config": {"path": "/nonexistent/nope.csv"},
+        "metrics": ["conversion"], "dims": ["device"]}])
+    out = _run(mon.check_once())          # must not raise
+    assert "error" in out[0]
