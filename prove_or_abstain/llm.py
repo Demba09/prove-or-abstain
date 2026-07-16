@@ -66,6 +66,16 @@ class QwenClient:
         # last call, not just what was requested.
         self.last_mode = "mock" if self.mock else "real"
         self.last_error: str | None = None
+        # Token/cost accounting — stays at 0 in mock mode (no round trips).
+        from prove_or_abstain.cost_tracker import CostTracker
+        self.tracker = CostTracker(self.model)
+
+    def _account(self, resp) -> None:
+        """Add a response's token usage to the cost tracker, if present."""
+        usage = getattr(resp, "usage", None)
+        if usage is not None:
+            self.tracker.add_usage(getattr(usage, "prompt_tokens", 0),
+                                   getattr(usage, "completion_tokens", 0))
 
     # --- low level: one raw chat call (lazy openai import) ---
     def complete(self, system: str, user: str,
@@ -85,6 +95,7 @@ class QwenClient:
                       {"role": "user", "content": user}],
             **kwargs,
         )
+        self._account(resp)
         return (resp.choices[0].message.content or "").strip()
 
     # --- use 5: drive an agentic tool-calling loop (orchestrates, decides
@@ -111,6 +122,7 @@ class QwenClient:
             model=self.model, temperature=temperature, max_tokens=max_tokens,
             messages=messages, tools=tools, tool_choice="auto",
         )
+        self._account(resp)
         msg = resp.choices[0].message
         calls = []
         for tc in (msg.tool_calls or []):

@@ -127,6 +127,11 @@ def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
         "autopilot_enabled": autopilot,
         "trace": [],
     }
+    # Snapshot the cost tracker so `cost` reports THIS request's spend, not the
+    # process-cumulative total (0 in mock mode).
+    _client = get_client()
+    _tok0, _usd0 = _client.tracker.total_tokens, _client.tracker.cost_usd
+
     # Both paths produce the same verdict; "agent" adds Qwen's tool-call trace.
     final = investigate_agentic(state) if mode == "agent" \
         else INVESTIGATION_GRAPH.invoke(state)
@@ -167,6 +172,11 @@ def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
         "report": final.get("report"),
         "speculations": final.get("speculations", []),
         "llm": final.get("llm"),
+        "cost": {
+            "model": _client.tracker.model,
+            "tokens": _client.tracker.total_tokens - _tok0,
+            "usd": round(_client.tracker.cost_usd - _usd0, 6),
+        },
         "trace": final.get("trace", []),
         "agent_trace": final.get("agent_trace", []),
     })

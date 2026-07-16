@@ -710,3 +710,18 @@ def test_agent_recovers_when_every_tool_errors(monkeypatch):
         dims=["device", "segment"], autopilot_enabled=True, trace=[]))
     assert out["verdict"] == ref["verdict"]
     assert out["winning_dim"] == ref["root_cause"]["dimension"]
+
+
+# ----------------------------------------------------------- cost tracking
+
+def test_cost_tracker_pricing():
+    from prove_or_abstain.cost_tracker import CostTracker
+    t = CostTracker("qwen-plus")
+    t.add_usage(1_000_000, 1_000_000)
+    assert t.cost_usd == pytest.approx(0.80 + 2.40)   # $/1M in + out
+    assert t.to_dict()["total_tokens"] == 2_000_000
+
+
+def test_api_reports_cost_zero_in_mock():
+    body = client.post("/investigate", json={"panel": "clean", "mode": "agent"}).json()
+    assert body["cost"]["usd"] == 0.0 and body["cost"]["tokens"] == 0
