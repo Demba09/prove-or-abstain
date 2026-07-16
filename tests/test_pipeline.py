@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 
 os.environ["QWEN_MOCK"] = "1"   # before any import that instantiates the LLM client
+os.environ.setdefault("PROBATIO_DB", ":memory:")   # never touch disk in tests
 
 import numpy as np
 import pandas as pd
@@ -566,3 +567,35 @@ def test_agent_verdict_independent_of_llm_path():
             assert out["confidence"] == pytest.approx(ref["confidence"]), label
     finally:
         al.get_client = orig
+
+
+# ---------------------------------------------------- memory (SQLite) layer
+
+def test_memory_records_and_dedupes_alerts():
+    from prove_or_abstain import memory
+    memory.reset()
+    iid = memory.record_investigation("conversion", ["segment"], "ASSERT", 0.8,
+                                      "segment=paid", "r", ["t"], "agent", "qwen-plus")
+    assert memory.get_investigation(iid)["verdict"] == "ASSERT"
+    a1 = memory.create_alert(iid, "conversion", "segment=paid", "EXECUTE", "d")
+    a2 = memory.create_alert(iid, "conversion", "segment=paid", "EXECUTE", "d")
+    assert a1 == a2                                   # deduped: same metric×cause
+    assert len(memory.get_active_alerts()) == 1
+    assert memory.resolve_alert(a1) is True
+    assert memory.resolve_alert(a1) is False          # already resolved
+    assert len(memory.get_active_alerts()) == 0
+    stats = memory.get_stats()
+    assert stats["total_investigations"] == 1 and stats["asserts"] == 1
+
+
+def test_autopilot_adapter_survives_on_memory():
+    # The SQLite-backed adapter still produces the legacy Execution/Dashboard.
+    from prove_or_abstain import memory, autopilot
+    memory.reset()
+    autopilot.record_execution("conversion", "segment", "paid", 0.79,
+                               "EXECUTE", "pause", "report", ["t1"])
+    execs = autopilot.get_executions()
+    assert "conversion:segment=paid" in execs
+    dash = autopilot.get_dashboard()
+    assert dash.total_executions == 1
+    assert dash.active_alerts[0]["detail"] == "pause"
