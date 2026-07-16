@@ -143,6 +143,41 @@ class QwenClient:
         return {"message": assistant_msg, "tool_calls": calls,
                 "content": msg.content or ""}
 
+    # --- resilience: recover JSON from a messy model reply, else fall back ---
+    def _robust_parse_json(self, text: str, fallback):
+        """Best-effort JSON recovery: (1) parse the fenced text; (2) parse the
+        substring between the outermost braces/brackets; (3) regex-extract the
+        known scalar fields; (4) give up and return `fallback`."""
+        s = _strip_fences(text or "")
+        try:
+            return json.loads(s)
+        except Exception:
+            pass
+        for open_c, close_c in (("{", "}"), ("[", "]")):
+            i, j = s.find(open_c), s.rfind(close_c)
+            if 0 <= i < j:
+                try:
+                    return json.loads(s[i:j + 1])
+                except Exception:
+                    pass
+        fields: dict = {}
+        m = re.search(r'verdict"?\s*[:=]\s*"?(ASSERT|ABSTAIN|NO_ANOMALY)', s, re.I)
+        if m:
+            fields["verdict"] = m.group(1).upper()
+        m = re.search(r'confidence"?\s*[:=]\s*([0-9]*\.?[0-9]+)', s, re.I)
+        if m:
+            try:
+                fields["confidence"] = float(m.group(1))
+            except ValueError:
+                pass
+        m = re.search(r'panel"?\s*[:=]\s*"?([a-zA-Z_]+)', s)
+        if m:
+            fields["panel"] = m.group(1)
+        m = re.search(r'metric"?\s*[:=]\s*"?([a-zA-Z_]+)', s)
+        if m:
+            fields["metric"] = m.group(1)
+        return fields or fallback
+
     # --- use 1: propose an exploration order (decides nothing) ---
     def plan_dimensions(self, metric: str, delta_rel: float, dims: list[str]) -> list[str]:
         if self.mock:
@@ -158,7 +193,9 @@ class QwenClient:
         user = json.dumps({"metric": metric, "delta_rel": round(delta_rel, 4),
                            "dimensions": list(dims)}, ensure_ascii=False)
         try:
-            order = json.loads(_strip_fences(self.complete(system, user, max_tokens=120)))
+            parsed = self._robust_parse_json(
+                self.complete(system, user, max_tokens=120), list(dims))
+            order = parsed if isinstance(parsed, list) else list(dims)
             order = [d for d in order if d in dims]          # guard: subset only
             order += [d for d in dims if d not in order]     # re-add anything dropped
             self.last_mode, self.last_error = "real", None
@@ -182,9 +219,10 @@ class QwenClient:
             "English, each phrased as a question."
         )
         try:
-            out = json.loads(_strip_fences(self.complete(system,
-                    json.dumps(payload, ensure_ascii=False), max_tokens=200)))
-            out = [s for s in out if isinstance(s, str)][:3]
+            parsed = self._robust_parse_json(self.complete(system,
+                    json.dumps(payload, ensure_ascii=False), max_tokens=200), [])
+            out = [s for s in parsed if isinstance(s, str)][:3] \
+                if isinstance(parsed, list) else []
             self.last_mode, self.last_error = "real", None
             return out or template_speculations(payload)
         except Exception as exc:
@@ -236,9 +274,11 @@ class QwenClient:
         user = json.dumps({"query": query, "panels": panels, "metrics": metrics},
                           ensure_ascii=False)
         try:
-            raw = json.loads(_strip_fences(self.complete(
+            raw = self._robust_parse_json(self.complete(
                 system, user, max_tokens=150,
-                response_format={"type": "json_object"})))
+                response_format={"type": "json_object"}), {})
+            if not isinstance(raw, dict):
+                raise ValueError("router did not return an object")
             panel = raw.get("panel")
             metric = raw.get("metric")
             if panel not in panels:

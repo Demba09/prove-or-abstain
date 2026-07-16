@@ -779,3 +779,19 @@ def test_audit_replay_detects_tampering():
                                final["agent_trace"], final["llm"]["model"], "agent")
     trail["confidence"] = 0.123                            # tamper
     assert verify_replay(trail, investigate_agentic(dict(st))) is False
+
+
+# ------------------------------------------------ robust JSON parsing (llm)
+
+def test_robust_parse_json_recovers_or_falls_back():
+    from prove_or_abstain.llm import QwenClient
+    c = QwenClient(mock=True)
+    assert c._robust_parse_json('["device","segment"]', None) == ["device", "segment"]
+    assert c._robust_parse_json("```json\n[\"a\",\"b\"]\n```", None) == ["a", "b"]
+    # JSON embedded in prose -> outermost-brace recovery
+    assert c._robust_parse_json('Here: {"panel":"clean"} done', None) == {"panel": "clean"}
+    # no valid JSON, but known fields -> regex recovery
+    got = c._robust_parse_json("verdict=ASSERT confidence: 0.83", "FB")
+    assert got == {"verdict": "ASSERT", "confidence": 0.83}
+    # total garbage -> fallback
+    assert c._robust_parse_json("no json here", "FB") == "FB"
