@@ -20,7 +20,9 @@ Run: uvicorn api.app:app --reload
 
 from __future__ import annotations
 
+import asyncio
 import io
+import json
 import math
 from dataclasses import asdict
 from pathlib import Path
@@ -30,7 +32,7 @@ import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 load_dotenv()
@@ -216,6 +218,45 @@ def investigate(req: InvestigateRequest) -> dict:
         mode=req.mode,
     )
     return {"panel": req.panel, **result}
+
+
+@app.get("/investigate/stream")
+async def investigate_stream(panel: Literal["clean", "diffuse", "mixshift", "deep"] = "clean",
+                            autopilot: bool = False) -> StreamingResponse:
+    """Server-Sent Events: stream the investigation step by step (detector →
+    testing → gate_result → verdict → drill → action → done). Runs the agent
+    loop in a threadpool and bridges its on_event callback to the async
+    response through an asyncio.Queue."""
+    loop = asyncio.get_running_loop()
+    queue: asyncio.Queue = asyncio.Queue()
+
+    def on_event(event_type: str, data: dict) -> None:
+        loop.call_soon_threadsafe(queue.put_nowait, (event_type, data))
+
+    def run() -> None:
+        state = {
+            "baseline": BASELINE, "current": _PANELS[panel], "metrics": _METRICS,
+            "metric_kinds": {}, "dims": ["device", "segment"],
+            "autopilot_enabled": autopilot, "trace": [],
+        }
+        try:
+            investigate_agentic(state, on_event=on_event)
+        finally:
+            loop.call_soon_threadsafe(queue.put_nowait, None)  # end sentinel
+
+    async def gen():
+        task = loop.run_in_executor(None, run)
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                event_type, data = item
+                yield f"event: {event_type}\ndata: {json.dumps(_jsonable(data))}\n\n"
+        finally:
+            await task
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 @app.post("/investigate/query")

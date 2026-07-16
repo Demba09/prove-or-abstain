@@ -657,3 +657,56 @@ def test_monitor_survives_bad_source():
         "metrics": ["conversion"], "dims": ["device"]}])
     out = _run(mon.check_once())          # must not raise
     assert "error" in out[0]
+
+
+# --------------------------------------------------- SSE streaming + fallback
+
+def test_sse_streams_events_in_order():
+    events = []
+    with client.stream("GET", "/investigate/stream?panel=clean&autopilot=true") as r:
+        assert r.status_code == 200
+        assert "text/event-stream" in r.headers["content-type"]
+        for line in r.iter_lines():
+            if line.startswith("event:"):
+                events.append(line.split(":", 1)[1].strip())
+    assert events[0] == "detector" and events[-1] == "done"
+    assert "gate_result" in events and "verdict" in events
+
+
+def test_agent_recovers_when_every_tool_errors(monkeypatch):
+    # item 8: even if every test_dimension tool call raises, the determinism
+    # sweep (which uses the math directly) still reaches the correct verdict.
+    import json as _json
+    import prove_or_abstain.agent_loop as al
+    from prove_or_abstain.panels import BASELINE as PB, CLEAN as PC
+    from prove_or_abstain.llm import template_report, template_speculations
+
+    ref = client.post("/investigate", json={"panel": "clean", "autopilot": True}).json()
+    monkeypatch.setattr(al, "_test_dimension",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    class _Stub:
+        mock = False; model = "stub"; last_mode = "real"; last_error = None
+        _script = [[("test_dimension", {"dimension": "device"})],
+                   [("test_dimension", {"dimension": "segment"})], [("finalize", {})]]
+        _i = 0
+
+        def chat_with_tools(self, messages, tools, **kw):
+            step = self._script[self._i]; self._i += 1
+            calls = [{"id": f"c{j}", "name": n, "arguments": a}
+                     for j, (n, a) in enumerate(step)]
+            msg = {"role": "assistant", "content": "", "tool_calls": [
+                {"id": c["id"], "type": "function",
+                 "function": {"name": c["name"], "arguments": _json.dumps(c["arguments"])}}
+                for c in calls]}
+            return {"message": msg, "tool_calls": calls, "content": ""}
+
+        def speculate_causes(self, p): return template_speculations(p)
+        def write_report(self, p): return template_report(p)
+
+    monkeypatch.setattr(al, "get_client", lambda: _Stub())
+    out = al.investigate_agentic(dict(baseline=PB, current=PC,
+        metrics=["conversion", "activation"], metric_kinds={},
+        dims=["device", "segment"], autopilot_enabled=True, trace=[]))
+    assert out["verdict"] == ref["verdict"]
+    assert out["winning_dim"] == ref["root_cause"]["dimension"]
