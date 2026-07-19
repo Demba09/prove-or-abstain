@@ -220,6 +220,15 @@ Qwen's orchestration can't change a verdict. The critical number is
 **false-ABSTAIN = 0% paired with false-ASSERT = 0%**: the agent never misses a
 real, localizable cause, and never invents one that isn't there.
 
+**What this 100% proves, and what it doesn't.** Every scenario here is
+constructed clearly on one side of the 4 gate thresholds (`MATERIAL_REL`,
+`CONCENTRATION_MIN`, `SIGNIFICANCE_ALPHA`, `INTERACTION_MAX` in
+`gates.py`) — none sits at the exact boundary. So 100% is solid evidence the
+code correctly implements its own documented rules (a regression test, and
+a real one), not evidence of correct behaviour on genuinely ambiguous real
+data or right at a threshold. That's what "Tested against real data" below
+is for.
+
 ### vs. a raw LLM
 
 `compare_llm_raw()` gives a bare Qwen only a text summary (no data) and asks for
@@ -263,6 +272,25 @@ real (not invented) datasets go through the same pipeline, committed in
   curl -X POST localhost:8000/investigate/upload \
     -F baseline=@examples/real_titanic_southampton.csv -F current=@examples/real_titanic_cherbourg.csv
   ```
+
+Two honest limits on what these two prove:
+
+1. **Deliberately not folded into the 100% above.** The 30 synthetic
+   scenarios have ground truth written *before* any run, derived from how
+   the panel was built. For these two, the "expected" outcome was
+   determined by running the pipeline and documenting what came out — not
+   an independently-established truth checked beforehand. Counting them
+   into `run_benchmark()`'s accuracy would reintroduce exactly the
+   circularity the benchmark otherwise avoids, so they stay two separate
+   tests, never part of the 30/30.
+2. **They don't test Qwen's reliability.** Both CSVs sent to the API are
+   already in the clean long-panel shape (`metric`, `n`, `c`) — reshaped by
+   hand before upload. `map_schema()` (the one place Qwen's decision can
+   change a verdict) never runs on either. These validate the deterministic
+   math against real-world noise, not Qwen's judgment on genuinely
+   ambiguous raw columns — that would need a real source with truly unusual
+   column names (not renamed by us) and a live DashScope key, neither of
+   which is available in every environment this runs in.
 
 ## Calibration
 
