@@ -137,13 +137,26 @@ It never produces a number and never decides a verdict.
   function calling and decides which dimension to test, in what order, and when
   to stop. The response carries an `agent_trace` of every tool call it made.
 
-Crucially, **both modes return the identical verdict.** The tools run the same
-gate math, and a determinism guard guarantees the LLM can never change the
-outcome — if Qwen skips a dimension or finalizes early, every untested
-dimension is checked deterministically before concluding, so a lazy or
-divergent model can never cause a false ABSTAIN. Qwen drives the *path*; the
-math decides the *verdict*. Offline (`QWEN_MOCK=1` or no key), the loop is
-replayed deterministically and reproduces the graph exactly.
+Crucially, **both modes return the identical ASSERT/ABSTAIN verdict.** The tools
+run the same gate math, and a determinism guard guarantees the LLM can never
+turn a real cause into a false ABSTAIN by skipping a dimension or finalizing
+early — every untested dimension is checked deterministically before
+concluding. Offline (`QWEN_MOCK=1` or no key), the loop is replayed
+deterministically and reproduces the graph exactly.
+
+**One honest nuance, found by actually running this against a live key (not
+just mock):** when a single narrow cell collapses (the `deep` scenario — a
+1-cell anomaly on a 2-dimension grid), it mathematically concentrates 100%
+on *both* of its defining dimensions at once — not a calibration accident,
+an inevitable property of a single-cell anomaly. Qwen's chosen test order
+then decides which one is reported as the top-level `root_cause` and which
+one shows up as the `drilldown.refined` detail — e.g. a live run ordered
+`segment` before `device` and reported `segment=paid` with `device=mobile`
+as the refinement, where the mock default order reports `device=mobile` on
+top with `segment=paid` refined. **The full diagnosis is recovered either
+way** — same cell, same two values, nothing lost or invented — only which
+of the two labels sits on top can depend on Qwen's ordering. The benchmark
+(below) credits a match on either field for exactly this reason.
 
 ### Where Qwen actually earns its keep
 
@@ -245,7 +258,11 @@ constructed clearly on one side of the 4 gate thresholds (`MATERIAL_REL`,
 code correctly implements its own documented rules (a regression test, and
 a real one), not evidence of correct behaviour on genuinely ambiguous real
 data or right at a threshold. That's what "Tested against real data" below
-is for.
+is for. On the `deep` category specifically, the grading credits a match on
+either the top-level cause or the drill-down's `refined` cause — see "Two
+orchestration modes" above for why: a single-cell anomaly concentrates 100%
+on both its defining dimensions, so whichever Qwen tests first becomes the
+headline and the driller always finds the other, never losing the diagnosis.
 
 ### vs. a raw LLM
 

@@ -68,7 +68,12 @@ Cloud Function Compute as-is.
   rather than a linear chain. A second orchestration mode lets Qwen itself
   drive the loop via tool calls instead of the fixed graph — a determinism
   guard still checks every untested dimension before concluding, so the two
-  modes are provably identical on verdict.
+  modes are provably identical on the ASSERT/ABSTAIN verdict. One nuance,
+  found by actually running it live rather than trusting the mock: when a
+  single narrow cell collapses, it concentrates 100% on both of its
+  defining dimensions at once, so Qwen's test order can decide which one is
+  the headline cause vs. the drill-down refinement — the full diagnosis is
+  recovered either way, never lost or invented.
 - **A benchmark that can't lie to itself.** 30 synthetic scenarios with
   ground truth written from how each panel is *generated*, never from
   running the pipeline — otherwise accuracy would be circular. 100%
@@ -122,6 +127,18 @@ Cloud Function Compute as-is.
 - **Bounding the loop without hardcoding a scenario.** The loop bound is
   `len(dims)`, not a magic constant — so it generalizes to any number of
   candidate dimensions without needing a rewrite.
+- **A single-cell anomaly is inherently ambiguous between its two axes, and
+  only a live run against a real key surfaced it.** Mock mode never
+  reorders dimensions, so it always tested `device` before `segment` and
+  always reported the same headline cause — masking that a single-cell
+  collapse mathematically concentrates 100% on *both* its defining
+  dimensions, not just the one mock happened to try first. A live Qwen run
+  ordered them differently and got marked "wrong" by our own benchmark,
+  which only checked the top-level cause. We verified the drill-down
+  recovers the other dimension either way (the diagnosis was never
+  actually wrong, just labelled differently), fixed the benchmark to credit
+  either field, and documented the nuance rather than quietly special-
+  casing it away.
 
 ## Accomplishments we're proud of
 

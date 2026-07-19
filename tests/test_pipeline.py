@@ -260,6 +260,33 @@ def test_clean_panel_does_not_refine():
     assert body["drilldown"]["refined"] is None
 
 
+def test_deep_panel_root_cause_and_refined_swap_with_dimension_order():
+    """A single-cell collapse (paid x mobile) concentrates 100% on BOTH its
+    defining dimensions -- mathematically inevitable, not a calibration
+    quirk (found via a real, non-mock Qwen run that happened to order
+    dimensions differently than the mock default and got marked "wrong" by
+    the benchmark before this was understood). Whichever dimension is
+    tested first becomes the top-level root_cause; the driller always finds
+    the OTHER one as `refined` -- so the full (paid, mobile) diagnosis is
+    recovered either way. Only the top-level/refined labelling depends on
+    order, never whether a cause is found or which cell it points to."""
+    from prove_or_abstain.panels import BASELINE
+    from prove_or_abstain.benchmark import _deep
+    from prove_or_abstain.graph import APP
+
+    curr = _deep("paid", "mobile", 0.03)
+    state = {"baseline": BASELINE, "current": curr,
+             "metrics": ["conversion", "activation"], "metric_kinds": {},
+             "dims": ["segment", "device"],  # segment tested BEFORE device
+             "autopilot_enabled": False, "trace": []}
+    final = APP.invoke(state)
+    assert final["verdict"] == "ASSERT"
+    assert final["winning_dim"] == "segment"
+    assert final["winning_report"].leading_segment == "paid"
+    refined = final["drilldown"]["refined"]
+    assert refined["dim"] == "device" and refined["segment"] == "mobile"
+
+
 def test_abstain_has_no_drilldown():
     body = client.post("/investigate", json={"panel": "diffuse"}).json()
     assert body["drilldown"] is None
