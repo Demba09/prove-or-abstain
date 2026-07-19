@@ -141,6 +141,7 @@ button:disabled { opacity: .5; cursor: wait; }
 .stamp.abstain { color: var(--abstain); background: var(--abstain-bg); }
 .stamp.none { color: var(--muted); background: var(--panel-alt); border-style: solid; }
 .verdict-meta { color: var(--muted); font-size: 13.5px; }
+.verdict-meta.cold-start { color: var(--ink); font-size: 15px; }
 .verdict-meta b { color: var(--ink); }
 .verdict-meta .num { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-variant-numeric: tabular-nums; }
 
@@ -193,8 +194,11 @@ table.dataset-table thead th { color: var(--muted); font-weight: 600; text-trans
 }
 .drilldown b { color: var(--accent-strong); }
 
-.action { border-radius: 8px; padding: 12px 14px; margin: 14px 0; font-size: 13.5px; background: var(--panel-alt); }
+.action { border-radius: 8px; padding: 12px 14px; margin: 14px 0; font-size: 13.5px; background: var(--panel-alt); border-left: 3px solid var(--line); }
 .action .kind { font-weight: 700; letter-spacing: .03em; font-size: 11px; text-transform: uppercase; color: var(--accent-strong); margin-right: 8px; }
+.action-execute { border-left-color: var(--assert); background: var(--assert-bg); }
+.action-execute .kind { color: var(--assert); }
+.action-recommend { border-left-color: var(--accent); }
 
 .report {
   font-size: 15px; line-height: 1.65; margin: 16px 0; padding: 14px 16px;
@@ -225,7 +229,6 @@ footer a { color: var(--accent-strong); }
 .advanced > summary:hover { color: var(--accent-strong); }
 .advanced-body { padding: 0 0 4px; }
 
-#dash-panel { display: none; }
 .dash-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .dash-header h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin: 0; }
 .dash-stats { display: flex; gap: 20px; font-size: 13px; color: var(--muted); flex-wrap: wrap; margin-bottom: 16px; }
@@ -398,15 +401,17 @@ footer a { color: var(--accent-strong); }
     </details>
   </div>
 
-  <div class="panel" id="dash-panel">
-    <div class="dash-header">
-      <h2>Autopilot Dashboard</h2>
-      <button class="secondary" type="button" id="dash-check-btn" onclick="runAutonomousCheck()">run autonomous check</button>
+  <details class="panel advanced" id="dashDetails">
+    <summary>Autopilot dashboard — background checks, active alerts, executions</summary>
+    <div class="advanced-body">
+      <div class="dash-header">
+        <button class="secondary" type="button" id="dash-check-btn" onclick="runAutonomousCheck()">run autonomous check</button>
+      </div>
+      <div class="dash-stats" id="dash-stats"></div>
+      <div id="dash-alerts"></div>
+      <div class="dash-empty" id="dash-empty">Loading&hellip;</div>
     </div>
-    <div class="dash-stats" id="dash-stats"></div>
-    <div id="dash-alerts"></div>
-    <div class="dash-empty" id="dash-empty">Loading&hellip;</div>
-  </div>
+  </details>
 
   <footer>
     Every number comes from pandas/numpy; the LLM only orders the dimensions to try, routes free-text
@@ -435,6 +440,7 @@ async function call(url, opts) {
     const body = await r.json();
     if (!r.ok) throw new Error(body.detail ? JSON.stringify(body.detail) : r.statusText);
     render(body);
+    loadDashboard();   // an EXECUTE just happened, or didn't — either way, reflect it now, not in up to 30s
   } catch (e) {
     fail(e.message);
   } finally {
@@ -529,12 +535,17 @@ function render(b) {
 
   const v = b.verdict || 'NO_ANOMALY';
   const stamp = $('verdict');
-  stamp.textContent = v;
-  stamp.className = 'stamp ' + (v === 'ASSERT' ? 'assert' : v === 'ABSTAIN' ? 'abstain' : 'none');
+  if (b.cold_start) {
+    stamp.style.display = 'none';
+  } else {
+    stamp.style.display = '';
+    stamp.textContent = v;
+    stamp.className = 'stamp ' + (v === 'ASSERT' ? 'assert' : v === 'ABSTAIN' ? 'abstain' : 'none');
+  }
 
   const metaParts = [];
   if (b.cold_start) {
-    metaParts.push(`source <b>${b.source_id}</b> seeded — send another observation for it to compare against`);
+    metaParts.push(`✓ source <b>${b.source_id}</b> seeded — nothing to compare against yet, send another observation for the same id`);
   } else {
     if (b.source_id) metaParts.push(`source <b>${b.source_id}</b>`);
     if (b.confidence != null) metaParts.push(`confidence <span class="num">${b.confidence.toFixed(2)}</span>`);
@@ -542,6 +553,7 @@ function render(b) {
     else if (v === 'ABSTAIN') metaParts.push('no localized cause');
   }
   $('meta').innerHTML = metaParts.join(' &nbsp;·&nbsp; ');
+  $('meta').className = 'verdict-meta' + (b.cold_start ? ' cold-start' : '');
 
   const exhibits = $('exhibits');
   exhibits.innerHTML = '';
@@ -567,7 +579,10 @@ function render(b) {
   }
 
   $('action').style.display = b.action ? 'block' : 'none';
-  if (b.action) $('action').textContent = `${b.action.kind} — ${b.action.detail}`;
+  if (b.action) {
+    $('action').className = 'action action-' + b.action.kind.toLowerCase();
+    $('action').innerHTML = `<span class="kind">${b.action.kind}</span>${b.action.detail}`;
+  }
 
   $('report').style.display = b.report ? 'block' : 'none';
   if (b.report) {
@@ -719,8 +734,6 @@ async function loadDashboard() {
 }
 
 function renderDashboard(d) {
-  $('dash-panel').style.display = 'block';
-
   const stats = $('dash-stats');
   const lastCheck = d.last_check_at ? new Date(d.last_check_at * 1000).toLocaleTimeString() : 'never';
   const uptimeMin = Math.floor(d.uptime_seconds / 60);
@@ -803,9 +816,11 @@ async function runAutonomousCheck() {
   }
 }
 
-// load dashboard on page load + refresh every 30s
-loadDashboard();
-setInterval(loadDashboard, 30000);
+// load only when the dashboard is actually opened, then keep it fresh while open
+$('dashDetails').addEventListener('toggle', () => {
+  if ($('dashDetails').open) loadDashboard();
+});
+setInterval(() => { if ($('dashDetails').open) loadDashboard(); }, 30000);
 </script>
 </body>
 </html>
