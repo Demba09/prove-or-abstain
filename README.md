@@ -39,6 +39,24 @@ your business segments and returns one of two verdicts:
 have a principled way to refuse to act when evidence is insufficient. Without it,
 the agent will always fabricate a plausible-sounding diagnosis — right or wrong.
 
+## Built for the Qwen Cloud Hackathon — Track 4: Autopilot Agent
+
+| Requirement | Implementation |
+|-------------|----------------|
+| **Handle ambiguous inputs** | `/investigate/query` routes free-text questions; `map_schema()` reshapes an unfamiliar raw source's columns for "Watch a source" |
+| **Qwen orchestrates via tool calls** | `mode="agent"` — Qwen drives the investigation through function calling (`agent_loop.py`), math still decides |
+| **Invoke external tools** | SQL connector, Google Sheets connector, CSV upload, time series, continuous source ingestion |
+| **Continuous autonomy** | `monitor.py` watches sources, investigates on movement, persists a durable baseline, alerts |
+| **Human-in-the-loop checkpoints** | ABSTAIN always escalates; autopilot requires confidence ≥ 0.70 to execute; alerts resolvable |
+| **Provable, not just a demo** | 30-scenario benchmark (100%, 0% false-ASSERT) plus 2 real external datasets, ECE calibration, reproducible audit trails, per-request cost |
+| **Production-ready** | Docker, CI, 90 tests, SQLite persistence, SSE streaming, API docs at `/docs` (ReDoc) |
+
+**Qwen Cloud integration:** `prove_or_abstain/llm.py` calls Qwen via DashScope for dimension ordering,
+report phrasing, query routing, and — the one deliberate exception — mapping an unfamiliar raw
+source's columns. Everywhere else, the math (pandas, numpy) and statistics (z-test, p ≤ 0.01) run
+independently and the verdict is **identical** with or without the LLM — `QWEN_MOCK=1` proves this.
+See "Where Qwen actually earns its keep" below for the full picture, including that one exception.
+
 ---
 
 ## Real-world walkthrough
@@ -583,23 +601,6 @@ With MCP, a Qwen agent:
 5. Generates a human-readable response with recommendations
 
 **Qwen is now the agent. Prove-or-Abstain is its skill.**
-
-## Built for the Qwen Cloud Hackathon — Track 4: Autopilot Agent
-
-| Requirement | Implementation |
-|-------------|----------------|
-| **Handle ambiguous inputs** | `/investigate/query` — Qwen routes free-text questions to the right scenario |
-| **Qwen orchestrates via tool calls** | `mode="agent"` — Qwen drives the investigation through function calling (`agent_loop.py`), math still decides |
-| **Invoke external tools** | SQL connector, Google Sheets connector, CSV upload, time series |
-| **Continuous autonomy** | `monitor.py` watches sources, investigates on movement, persists + alerts |
-| **Human-in-the-loop checkpoints** | ABSTAIN always escalates; autopilot requires confidence ≥ 0.70 to execute; alerts resolvable |
-| **Provable, not just a demo** | 30-scenario benchmark (100%, 0% false-ASSERT), ECE calibration, reproducible audit trails, per-request cost |
-| **Production-ready** | Docker, CI, 90 tests, SQLite persistence, SSE streaming, API docs at `/docs` (ReDoc) |
-
-**Qwen Cloud integration:** `prove_or_abstain/llm.py` calls Qwen via DashScope for dimension ordering,
-report phrasing, and query routing only. The math (pandas, numpy) and statistics
-(z-test, p ≤ 0.01) run independently. The verdict is **identical** with or without the LLM — 
-`QWEN_MOCK=1` proves this.
 
 ## What's next
 
