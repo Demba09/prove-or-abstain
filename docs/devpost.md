@@ -26,10 +26,23 @@ dimension clears the bar, it **ABSTAINs**, escalates to a human, and names
 exactly which gate failed and why.
 
 It works on rate metrics and sum metrics (revenue decomposes into volume ×
-average basket), takes arbitrary CSV panels or a multi-period time series
-with a rolling pooled baseline, and — after a proven verdict only — asks the
-LLM for business hypotheses about the *why*, clearly labelled as unverified
-speculation, never mixed with the proven numbers.
+average basket), and accepts data four different ways: an arbitrary CSV
+panel, a live SQL query, a Google Sheet, or a multi-period time series with a
+rolling pooled baseline. A fifth mode, **"Watch a source"**, needs no
+baseline file at all — send one observation at a time, tagged with a source
+id, and it compares each new one against everything already persisted for
+that source (SQLite-backed, survives a restart). If the columns you send
+don't already match our schema, Qwen maps them — the *one* place in the
+whole system where its judgment can actually change the outcome, everywhere
+else it only orders, routes, or phrases.
+
+A continuous autopilot (`monitor.py`) watches a set of sources on a timer,
+investigates on movement, and fires a webhook (Slack/Discord/Teams
+auto-detected) on a confident `ASSERT` — with every execution logged to an
+audit trail a human can resolve. A free-text endpoint lets Qwen route plain
+English ("why did conversion drop?") to the right investigation. And an MCP
+server exposes the whole pipeline as tools a Qwen Cloud agent can call
+directly, so Qwen can be the outer orchestrator instead of just a component.
 
 It's built as a bounded LangGraph loop (never an unbounded cycle — the agent
 tries each candidate dimension once, in an LLM-suggested order, and stops),
@@ -40,23 +53,46 @@ Cloud Function Compute as-is.
 
 - **The math first.** Before any agent logic existed, we built the exact
   rate/mix/interaction decomposition and validated it against a hand-derived
-  oracle (`scripts/attribution_reference.py` / `scripts/gate_check.py`) on three calibrated
-  scenarios: a clean localized cause, a diffuse uniform shift, and a mix
-  shift where composition and rate move together. Zero residual, verified.
-- **Gates before agent.** The ASSERT/ABSTAIN decision (`prove_or_abstain/gates.py`) was tuned
-  and validated (`scripts/gate_check_gates.py`) against those same three scenarios
-  *before* wiring the LangGraph loop around it — so the safety property was
-  proven independently of the orchestration.
+  oracle (`scripts/attribution_reference.py` / `scripts/gate_check.py`) on
+  three calibrated scenarios: a clean localized cause, a diffuse uniform
+  shift, and a mix shift where composition and rate move together. Zero
+  residual, verified.
+- **Gates before agent.** The ASSERT/ABSTAIN decision (`prove_or_abstain/gates.py`)
+  was tuned and validated (`scripts/gate_check_gates.py`) against those same
+  three scenarios *before* wiring the LangGraph loop around it — so the
+  safety property was proven independently of the orchestration.
 - **LangGraph for the bounded loop.** `detector → hypothesizer → investigator
   → verifier` with a conditional edge back to `hypothesizer` when a dimension
   doesn't localize, bounded by the number of candidate dimensions. This
   conditional cycle is the actual reason LangGraph earns its place here
-  rather than a linear chain.
-- **A hard LLM boundary.** The LLM (Qwen via DashScope) does exactly two
-  things: order which dimension to try first, and write the final sentence.
-  It never computes a number and never decides a verdict — every number in
-  the output comes from pandas/numpy. A mock mode (`QWEN_MOCK=1`) makes the
-  whole pipeline deterministic and runnable offline for the demo.
+  rather than a linear chain. A second orchestration mode lets Qwen itself
+  drive the loop via tool calls instead of the fixed graph — a determinism
+  guard still checks every untested dimension before concluding, so the two
+  modes are provably identical on verdict.
+- **A benchmark that can't lie to itself.** 30 synthetic scenarios with
+  ground truth written from how each panel is *generated*, never from
+  running the pipeline — otherwise accuracy would be circular. 100%
+  accuracy, 0% false-ASSERT, 0% false-ABSTAIN, identical across graph/agent
+  mode. We're upfront in the README about what that number does and doesn't
+  prove: it's a strong regression test against cases built clearly on one
+  side of each gate's threshold, not evidence on genuinely ambiguous data —
+  which is why two *real* public datasets (historical airline passenger
+  counts, the Titanic manifest) also go through the pipeline, reshaped but
+  not invented, kept deliberately separate from the official benchmark
+  number to avoid smuggling circularity back in.
+- **Calibration, not just accuracy.** `calibrate.py` buckets ASSERT
+  confidence and reports Expected Calibration Error — does a 0.7 confidence
+  actually mean "right ~70% of the time"? (ECE ≈ 0.19, conservative:
+  under-confident rather than over-confident, the safe direction for an
+  agent that can act.)
+- **A hard LLM boundary, audited not just asserted.** Qwen orders which
+  dimension to try, phrases the report, classifies an unfamiliar metric as
+  rate/sum, routes free-text questions, and — the one deliberate exception —
+  maps a raw source's columns onto our schema, with a self-verification pass
+  where it re-checks its own first answer before it's acted on. Everywhere
+  else, `QWEN_MOCK=1` reproduces the identical verdict offline, and
+  `audit.py` freezes any investigation into a SHA256-hashed, replayable
+  trail so that claim is checkable, not just stated.
 - **Ship as one container.** A `python:3.12-slim` Dockerfile, `.env` never
   baked into the image, secrets injected at runtime — verified end-to-end
   with a live container run (`/health`, both demo panels) before writing a
@@ -69,10 +105,20 @@ Cloud Function Compute as-is.
   where composition and rate move simultaneously so the interaction term is
   non-trivial. That's what actually stress-tests the "clean mechanism" gate
   rather than just the "localized" one.
-- **Keeping the LLM boundary honest.** It's tempting to let the model
-  "helpfully" adjust a number or nudge a verdict in its prose. We drew the
-  line at ordering + rephrasing only, and the mock-mode fallback means the
-  verdict is provably identical whether the LLM is in the loop or not.
+- **Keeping the LLM boundary honest while giving it real jobs.** It's
+  tempting to let the model "helpfully" adjust a number or nudge a verdict.
+  We drew the line at ordering, routing, and phrasing — until "Watch a
+  source" needed to interpret genuinely unfamiliar raw columns, where there
+  *is* no single mechanically-correct answer. Rather than fake determinism
+  there, we made it the one explicit, documented exception, with Qwen
+  self-verifying its own mapping before it's used and a deterministic
+  validation pass as the backstop.
+- **Not letting the persisted baseline get away from us.** An earlier
+  version of continuous monitoring kept its "last known" baseline in an
+  in-process dict — lost on restart, and a duplicate of the same
+  materiality check the graph already does. Moving it to a real SQLite
+  table with a pooled reference window (reusing the same summed-counts
+  algebra as the time-series baseline) removed both problems at once.
 - **Bounding the loop without hardcoding a scenario.** The loop bound is
   `len(dims)`, not a magic constant — so it generalizes to any number of
   candidate dimensions without needing a rewrite.
@@ -90,23 +136,38 @@ Cloud Function Compute as-is.
 - **Drill-down**: after proving `device=mobile`, the agent re-decomposes
   within mobile and narrows the cause to `segment=paid` — or states
   explicitly that the whole segment is affected.
-- Calibrated scenarios that fail for *different*, nameable reasons (no
-  anomaly / diffuse / entangled mix / not significant), not just "on" and
-  "off".
+- **100% on a 30-scenario benchmark, 0% false-ASSERT and false-ABSTAIN**,
+  plus two real external datasets that agree with well-documented history
+  (the 1960 air-travel growth spike was systemic, not seasonal; Titanic
+  survival localizes to sex, not the popular class explanation) — and we say
+  plainly, in the README, what the synthetic 100% does and doesn't prove.
+- A **continuous autopilot** that persists its own baseline, survives a
+  restart, and never lets one broken data source corrupt another's history.
+- A **fully offline, reproducible pipeline** (`QWEN_MOCK=1`) with a
+  SHA256-hashed, replayable audit trail — and one honestly-documented
+  exception to that guarantee, not a silently broken promise.
 - A container that actually runs — build, `/health`, both verdict paths,
   all verified live, not just claimed.
 
 ## What's next
 
-Out of MVP scope for the hackathon, but the direction is clear: real action
-targets behind the actuator (Slack, Jira, Stripe, ad platforms), a **closed
-control loop** that observes the effect of an executed action and
-re-investigates, live data connectors (warehouse, Stripe, GA) instead of CSV
-uploads, seasonality-aware baselines, real-time monitoring with alerting,
-and memory of past investigations so recurring causes are recognized faster.
+- OAuth-native connectors (Stripe, GA4, Amplitude) beyond the current
+  DSN/shared-link model
+- Real downstream actions wired behind the actuator (Slack alerts, feature
+  flags, campaign pausing) and a **closed control loop** that observes the
+  effect of an executed action and re-investigates
+- Seasonality- and trend-aware baselines, and an adaptive (not just
+  fixed-window) pooling strategy for long-running watched sources
+- Deeper drill-down (currently one level: winning segment × one other
+  dimension)
+- `evidence.py`'s embedded operational-event table replaced by a real
+  calendar/deploy-log/ticketing integration
+- A genuinely multi-turn conversational front-end, beyond today's single
+  filtered follow-up
 
 ## Built with
 
 `python` · `fastapi` · `langgraph` · `pandas` · `numpy` · `pydantic` ·
-`uvicorn` · `docker` · Qwen (`qwen-plus`) via Alibaba Cloud DashScope ·
+`uvicorn` · `sqlite` · `sqlalchemy` · `docker` · Qwen (`qwen-plus`) via
+Alibaba Cloud DashScope · MCP (Model Context Protocol) ·
 Alibaba Cloud Container Registry + Function Compute
