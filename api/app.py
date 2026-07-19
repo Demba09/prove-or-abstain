@@ -45,7 +45,8 @@ from prove_or_abstain.connectors.sql import SqlQueryError, fetch_panel as fetch_
 from prove_or_abstain.agent_loop import investigate_agentic
 from prove_or_abstain.graph import APP as INVESTIGATION_GRAPH
 from prove_or_abstain.llm import get_client
-from prove_or_abstain.panels import BASELINE, CLEAN, DEEP, DIFFUSE, MIXSHIFT, split_series
+from prove_or_abstain.panels import (BASELINE, CLEAN, DEEP, DIFFUSE, MIXSHIFT,
+                                     DEVICES, SEGMENTS, split_series)
 
 # docs_url=None frees /docs from the built-in Swagger route so the
 # redirect below can point it at ReDoc instead.
@@ -66,6 +67,10 @@ _PANEL_DESCRIPTIONS = {
             "narrows it further",
 }
 _METRICS = ["conversion", "activation"]
+# Known segment values of the built-in panels' dimensions — handed to the LLM
+# router (/investigate/query) so a follow-up ("and on mobile only?") can SELECT
+# a filter among these, never invent one outside them.
+_DIM_VALUES = {"device": DEVICES, "segment": SEGMENTS}
 _STATIC = Path(__file__).parent / "static"
 _REQUIRED = {"metric", "n", "c"}             # mandatory long-panel columns
 _RESERVED = _REQUIRED | {"period"}           # non-dimension columns
@@ -82,6 +87,10 @@ class InvestigateRequest(BaseModel):
 class QueryRequest(BaseModel):
     query: str                # free-text question, e.g. "why did conversion drop?"
     autopilot: bool = False
+    # Set this to the `panel` field of a previous /investigate/query response
+    # to ask a follow-up in the same conversation ("and on mobile only?")
+    # instead of re-routing from scratch.
+    previous_panel: Literal["clean", "diffuse", "mixshift", "deep"] | None = None
 
 
 class SqlRequest(BaseModel):
@@ -275,17 +284,46 @@ def investigate_query(req: QueryRequest) -> dict:
     the four demo panels/metrics from `req.query` (never invents one —
     guarded in llm.route_query), then the same deterministic pipeline runs
     unchanged. Demonstrates the LLM boundary on a natural-language intent
-    rather than a hardcoded panel name."""
+    rather than a hardcoded panel name.
+
+    Conversational follow-up: pass `previous_panel` (the `panel` field of an
+    earlier response) and a text like "and on mobile only?" — Qwen may also
+    SELECT a (dim, segment) filter from the panel's known values (never
+    invents one), and the same panel is filtered to it before re-running the
+    unchanged pipeline. A single stateless call: the caller carries the
+    conversation, not the server."""
     if not req.query.strip():
         raise HTTPException(400, "query must not be empty")
-    routed = get_client().route_query(req.query, _PANEL_DESCRIPTIONS, _METRICS)
+    routed = get_client().route_query(req.query, _PANEL_DESCRIPTIONS, _METRICS,
+                                      dims=_DIM_VALUES, previous_panel=req.previous_panel)
+    base, curr = BASELINE, _PANELS[routed["panel"]]
+    filt = routed.get("filter")
+    if filt:
+        base = base[base[filt["dim"]] == filt["segment"]]
+        curr = curr[curr[filt["dim"]] == filt["segment"]]
     result = _run_investigation(
-        BASELINE, _PANELS[routed["panel"]],
+        base, curr,
         metrics=_METRICS,
         dims=["device", "segment"],
         autopilot=req.autopilot,
     )
     return {"panel": routed["panel"], "routing": routed, **result}
+
+
+@app.post("/investigate/suggest")
+def investigate_suggest(baseline: UploadFile = File(...)) -> dict:
+    """Setup helper for bring-your-own-data. Dimensions need no suggestion —
+    every non-reserved CSV column IS a dimension, exactly (see
+    _investigate_pair below). What genuinely needs judgment is classifying
+    each metric NAME as rate or sum, so Qwen does that one step; the caller
+    still confirms before /investigate/upload runs anything."""
+    df = _read_panel(baseline, "baseline")
+    dims = [c for c in df.columns if c not in _RESERVED]
+    metrics = sorted(df["metric"].unique())
+    suggestion = get_client().suggest_setup(metrics)
+    client = get_client()
+    return {"dims": dims, "metrics": metrics, **suggestion,
+            "llm": {"model": client.model, "mode": client.last_mode}}
 
 
 def _dataset_payload(base: pd.DataFrame, curr: pd.DataFrame) -> dict:

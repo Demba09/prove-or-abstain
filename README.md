@@ -252,6 +252,7 @@ prove_or_abstain/   core package — the deterministic pipeline
   benchmark.py        30 ground-truth scenarios + cross-model eval
   calibrate.py        confidence calibration + ECE
   audit.py            reproducible, verifiable audit trails
+  evidence.py         synthetic operational-event lookup, grounds ASSERT speculation
   connectors/         SQL (Postgres/MySQL/SQLite) and Google Sheets
 api/                deployment entry point — FastAPI app + static demo page (SSE stream)
 mcp_server.py       MCP entry point for Qwen Cloud agents
@@ -308,7 +309,8 @@ python -m prove_or_abstain.audit       # audit trail + reproducibility check
 GET  /                     demo page
 POST /investigate          built-in scenario: { "panel": "clean" | "diffuse" | "mixshift" | "deep", "autopilot": false, "mode": "graph" | "agent" }
 GET  /investigate/stream   Server-Sent Events: stream the investigation step by step (?panel=&autopilot=)
-POST /investigate/query    natural language: { "query": "why did conversion drop?" }
+POST /investigate/query    natural language: { "query": "why did conversion drop?", "previous_panel": "clean" }
+POST /investigate/suggest  setup helper: upload a sample CSV, get back sum-vs-rate metric classification
 POST /investigate/upload   CSV upload (multipart: baseline + current)
 POST /investigate/sql      live database: { "dsn": "...", "baseline_query": "...", "current_query": "..." }
 POST /investigate/sheets   live Google Sheets: { "baseline_url": "...", "current_url": "..." }
@@ -320,6 +322,37 @@ GET  /executions           audit trail of all EXECUTE actions
 POST /executions/{id}/resolve  human resolves an active alert
 GET  /health               healthcheck
 ```
+
+### Where Qwen's contribution stops being decorative
+
+Ordering 2 dimensions or rephrasing an already-computed verdict is low-stakes
+busywork a template does just as well (`QWEN_MOCK=1` proves it — same
+verdicts, same accuracy). Four places narrow that gap to where an LLM
+actually beats a fixed rule:
+
+- **`suggest_setup()`** (`POST /investigate/suggest`) — classifying an
+  unfamiliar metric NAME as rate or sum is a real text-understanding call;
+  unlike dimensions (exactly inferred from the CSV's own columns, no
+  ambiguity), a rule-based keyword list is the fallback, not the answer.
+- **Wider dimension spaces** — `plan_dimensions()`'s ordering only matters
+  when there's more than 2 candidates to order. `examples/plan_baseline.csv`
+  / `plan_current.csv` add a 3rd dimension (`plan`) where neither `segment`
+  nor `device` localizes (concentration 0.25 and 0.50, both < 0.55) and only
+  `plan` does (1.0) — testing it first instead of last finds the cause in 1
+  iteration instead of 3. Same verdict either order; real difference in cost
+  and latency (see `test_dimension_order_changes_speed_not_verdict`).
+- **Conversational follow-up** — `POST /investigate/query` accepts
+  `previous_panel` plus a follow-up like *"and on mobile only?"*: Qwen may
+  select a `(dim, segment)` filter from the panel's known values (guarded by
+  `_guard_filter`, same anti-invention rule as the panel/metric selection)
+  and the pipeline re-runs, filtered, unchanged otherwise.
+- **Evidence-grounded speculation** (`prove_or_abstain/evidence.py`) — on
+  ASSERT, `speculate_causes()` is handed any operational events already
+  logged for the winning segment (a campaign change, a deploy...) and grounds
+  a hypothesis in the most relevant one instead of guessing blindly. Still
+  labelled speculation for a human to confirm — this is a small embedded
+  table standing in for a real calendar/deploy-log integration (see
+  "What's next").
 
 ## Autonomous monitoring, persistence & audit
 
@@ -475,6 +508,8 @@ report phrasing, and query routing only. The math (pandas, numpy) and statistics
 - Seasonality and trend modelling for time series
 - Deeper drill-down (currently one level: winning segment × one other dimension)
 - Downstream actions wired to real systems (Slack alerts, feature flags, campaign pausing)
+- `evidence.py`'s embedded table replaced by a real calendar/deploy-log/ticketing integration
+- Multi-turn `/investigate/query` beyond a single filtered follow-up (a real conversation, not one filter)
 
 ## License
 

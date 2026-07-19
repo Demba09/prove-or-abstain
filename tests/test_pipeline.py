@@ -340,6 +340,150 @@ def test_query_never_picks_outside_panels():
     assert body["panel"] in {"clean", "diffuse", "mixshift", "deep"}
 
 
+# ------------------------------------------------------- conversational follow-up
+def test_query_followup_filters_to_named_segment():
+    unfiltered = client.post("/investigate", json={"panel": "clean"}).json()
+    filtered = client.post("/investigate/query", json={
+        "query": "and what about just mobile",
+        "previous_panel": "clean",
+    }).json()
+    assert filtered["panel"] == "clean"
+    assert filtered["routing"]["filter"] == {"dim": "device", "segment": "mobile"}
+    # the pipeline actually ran on half the population once filtered
+    assert (filtered["gates"]["segment"]["leading_sample_n"]
+            < unfiltered["gates"]["segment"]["leading_sample_n"])
+
+
+def test_query_followup_keeps_previous_panel_without_filter():
+    body = client.post("/investigate/query", json={
+        "query": "and what about that",
+        "previous_panel": "diffuse",
+    }).json()
+    assert body["panel"] == "diffuse"
+    assert body["routing"]["filter"] is None
+
+
+def test_guard_filter_rejects_values_outside_the_supplied_dims():
+    # This is the safety net for the REAL LLM path (route_query's non-mock
+    # branch): a filter is only accepted if both the dim and the segment
+    # value were in what the caller supplied, never a hallucinated pair.
+    from prove_or_abstain.llm import _guard_filter
+    dims = {"segment": ["organic", "paid"], "device": ["mobile", "desktop"]}
+    assert _guard_filter({"dim": "segment", "segment": "paid"}, dims) == \
+        {"dim": "segment", "segment": "paid"}
+    assert _guard_filter({"dim": "segment", "segment": "moon"}, dims) is None
+    assert _guard_filter({"dim": "country", "segment": "france"}, dims) is None
+    assert _guard_filter(None, dims) is None
+    assert _guard_filter({"dim": "segment", "segment": "paid"}, None) is None
+
+
+# ------------------------------------------------------------- setup suggestion
+def test_suggest_setup_flags_revenue_as_sum():
+    from prove_or_abstain.llm import template_suggest_setup
+    out = template_suggest_setup(["conversion", "revenue", "activation"])
+    assert out["sum_metrics"] == ["revenue"]
+
+
+def test_suggest_setup_never_invents_a_metric_name():
+    from prove_or_abstain.llm import get_client
+    out = get_client().suggest_setup(["conversion", "revenue"])
+    assert set(out["sum_metrics"]) <= {"conversion", "revenue"}
+
+
+def test_investigate_suggest_endpoint():
+    from prove_or_abstain.panels import BASELINE
+    r = client.post("/investigate/suggest",
+                    files={"baseline": ("baseline.csv", _csv(BASELINE), "text/csv")})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert set(body["dims"]) == {"segment", "device"}
+    assert body["metrics"] == ["activation", "conversion"]
+    assert body["sum_metrics"] == []          # neither metric name hints at a sum
+
+
+def test_investigate_suggest_flags_revenue_column():
+    from prove_or_abstain.panels import BASELINE
+    revenue_panel = BASELINE.copy()
+    revenue_panel["metric"] = "revenue"
+    r = client.post("/investigate/suggest",
+                    files={"baseline": ("baseline.csv", _csv(revenue_panel), "text/csv")})
+    assert r.json()["sum_metrics"] == ["revenue"]
+
+
+# -------------------------------------------------- wide dimension space (3+ dims)
+def _plan_examples():
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent / "examples"
+    return (root / "plan_baseline.csv").read_bytes(), (root / "plan_current.csv").read_bytes()
+
+
+def test_upload_localizes_on_a_third_dimension():
+    """Neither 'segment' nor 'device' localizes this drop (concentration
+    0.25 and 0.50, both < 0.55) — only 'plan' does (concentration 1.0).
+    Proves the loop isn't hardcoded to 2 dimensions: it exhausts whatever
+    candidate list it's given, in CSV column order (segment, device, plan)."""
+    base_csv, curr_csv = _plan_examples()
+    r = client.post("/investigate/upload", files={
+        "baseline": ("baseline.csv", base_csv, "text/csv"),
+        "current": ("current.csv", curr_csv, "text/csv"),
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["verdict"] == "ASSERT"
+    assert body["root_cause"] == {"dimension": "plan", "segment": "free"}
+    assert body["gates"]["segment"]["verdict"] == "ABSTAIN"
+    assert body["gates"]["device"]["verdict"] == "ABSTAIN"
+
+
+def test_dimension_order_changes_speed_not_verdict():
+    """Same data, same verdict, but testing 'plan' first instead of last
+    finds it in 1 iteration instead of 3 — this is exactly what Qwen's
+    plan_dimensions() ordering buys in agent/graph mode: the math tests
+    every dimension either way, so the outcome can't change, but a good
+    order gets there faster (fewer investigator/verifier passes)."""
+    import io
+    from prove_or_abstain.graph import APP as GRAPH
+    base_csv, curr_csv = _plan_examples()
+    base = pd.read_csv(io.BytesIO(base_csv))
+    curr = pd.read_csv(io.BytesIO(curr_csv))
+
+    def run(dims):
+        state = {"baseline": base, "current": curr, "metrics": ["conversion"],
+                 "dims": dims, "autopilot_enabled": False, "trace": []}
+        return GRAPH.invoke(state)
+
+    worst = run(["segment", "device", "plan"])   # plan tried last
+    best = run(["plan", "segment", "device"])     # plan tried first
+
+    assert worst["verdict"] == best["verdict"] == "ASSERT"
+    assert worst["winning_dim"] == best["winning_dim"] == "plan"
+    assert best["iteration"] < worst["iteration"]
+    assert best["iteration"] == 1
+    assert worst["iteration"] == 3
+
+
+# --------------------------------------------------- evidence-grounded speculation
+def test_find_events_matches_exact_segment():
+    from prove_or_abstain.evidence import find_events
+    events = find_events("segment", "paid")
+    assert events and events[0]["event"] == "campaign_budget_cut"
+    assert find_events("segment", "organic") != events
+    assert find_events("segment", "unknown_segment") == []
+    assert find_events(None, "paid") == []
+
+
+def test_assert_speculation_grounds_in_logged_event():
+    # CLEAN localizes to segment=paid, which has a matching synthetic event.
+    body = client.post("/investigate", json={"panel": "clean"}).json()
+    assert body["root_cause"] == {"dimension": "segment", "segment": "paid"}
+    assert any("campaign_budget_cut" in s for s in body["speculations"])
+
+
+def test_abstain_speculation_has_no_events_to_ground_in():
+    body = client.post("/investigate", json={"panel": "diffuse"}).json()
+    assert body["speculations"] == []   # unchanged: ABSTAIN never speculates
+
+
 # --------------------------------------------------------------- SQL connector
 def _sqlite_dsn(tmp_path, tables: dict) -> str:
     from sqlalchemy import create_engine
