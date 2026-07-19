@@ -15,6 +15,10 @@ decides no verdict. It does exactly four things:
     it cannot invent a panel or metric that doesn't exist. On a follow-up
     turn it may also SELECT a (dim, segment) filter mentioned in the text,
     from the values the caller supplies — same rule, no invention.
+  - extract_filter()  : the same (dim, segment) selection as route_query's
+    follow-up, but standalone — for "ask" against a dataset that isn't one
+    of the named built-in panels (a watched source has exactly one active
+    dataset, so there's nothing to route to, only a filter to extract).
   - chat_with_tools() : ORCHESTRATE an investigation via tool calls. Qwen
     chooses which dimensions to test and when to stop; the tools run the
     same deterministic math, and the verdict is recomputed from the gate
@@ -326,6 +330,34 @@ class QwenClient:
             self.last_mode, self.last_error = "fallback", str(exc)
             return template_route_query(query, panels, metrics, dims, previous_panel)
 
+    # --- use 5: SELECT a (dim, segment) filter from free text against a
+    # single already-active dataset (no panel to pick, unlike route_query) ---
+    def extract_filter(self, query: str, dims: dict[str, list]) -> dict | None:
+        """"Ask" against a watched source: there's exactly one dataset in
+        play, so this only needs the filter half of route_query(). Returns
+        {"dim":.., "segment":..} or None — never a value outside `dims`."""
+        if self.mock:
+            self.last_mode, self.last_error = "mock", None
+            return _scan_filter(query, dims)
+        system = (
+            "The user may be asking to narrow an analysis to one segment "
+            "(e.g. 'and on mobile only?'). If the text clearly names ONE "
+            "known segment value from 'dims', return it as a filter; "
+            "otherwise return null. Return ONLY a JSON object: "
+            "{\"dim\": <one of dims' keys> or null, \"segment\": <one of "
+            "that dim's values> or null}."
+        )
+        user = json.dumps({"query": query, "dims": dims}, ensure_ascii=False)
+        try:
+            raw = self._robust_parse_json(self.complete(
+                system, user, max_tokens=100,
+                response_format={"type": "json_object"}), {})
+            self.last_mode, self.last_error = "real", None
+            return _guard_filter(raw, dims)
+        except Exception as exc:
+            self.last_mode, self.last_error = "fallback", str(exc)
+            return _scan_filter(query, dims)
+
     # --- use 6: classify each metric NAME as "rate" or "sum" — the only
     # setup step where the caller doesn't already know the answer exactly.
     # Dimensions need no classification: every non-reserved CSV column IS a
@@ -492,6 +524,23 @@ def _guard_filter(raw_filter, dims: dict[str, list] | None) -> dict | None:
     return None
 
 
+def _scan_filter(query: str, dims: dict[str, list] | None) -> dict | None:
+    """Deterministic keyword scan (mock mode / fallback, shared by
+    template_route_query and extract_filter): the first known segment value
+    of any dim that's literally named in the query, else None. Segment
+    values are matched as a whole word OR a raw substring (not just a
+    `_words` token) so multi-word/underscored values ("majority_women")
+    still match — `_words` would otherwise split them into pieces that
+    never equal the full value."""
+    q_words, q_lower = _words(query), query.lower()
+    for dim, segments in (dims or {}).items():
+        hit = next((s for s in segments
+                    if str(s).lower() in q_words or str(s).lower() in q_lower), None)
+        if hit is not None:
+            return {"dim": dim, "segment": hit}
+    return None
+
+
 def template_route_query(query: str, panels: dict[str, str],
                          metrics: list[str], dims: dict[str, list] | None = None,
                          previous_panel: str | None = None) -> dict:
@@ -512,14 +561,7 @@ def template_route_query(query: str, panels: dict[str, str],
         panel = best_panel
     metric = next((m for m in metrics if m.lower() in q_words), None)
 
-    filt = None
-    for dim, segments in (dims or {}).items():
-        hit = next((s for s in segments if str(s).lower() in q_words), None)
-        if hit is not None:
-            filt = {"dim": dim, "segment": hit}
-            break
-
-    return {"panel": panel, "metric": metric, "filter": filt,
+    return {"panel": panel, "metric": metric, "filter": _scan_filter(query, dims),
            "reason": "keyword match (mock/fallback routing, no LLM call)"}
 
 

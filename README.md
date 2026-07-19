@@ -103,8 +103,9 @@ QWEN_MOCK=1 uvicorn api.app:app --reload
 ```
 
 The demo page lets you run the 4 built-in scenarios (clean, diffuse, mixshift, deep),
-ask questions in plain English, or plug in your own data — CSV upload, SQL database query,
-Google Sheets.
+watch a source with no baseline file, or ask questions in plain English — about whichever of
+those you last ran. CSV upload, SQL, and Google Sheets remain available (see the API table below);
+the page itself only surfaces CSV upload, to keep the primary flow to what a first look needs.
 
 ![architecture](docs/architecture.svg)
 
@@ -175,7 +176,10 @@ narrow that gap to where an LLM beats a fixed rule outright:
 - **Conversational follow-up** — `POST /investigate/query` accepts
   `previous_panel` plus a follow-up like *"and on mobile only?"*: Qwen may
   select a `(dim, segment)` filter from values it's given (never invents
-  one) and the pipeline re-runs, filtered.
+  one) and the pipeline re-runs, filtered. Pass `source_id` instead to ask
+  the same kind of question about a **"Watch a source"** id — there's one
+  active dataset there, not 4 named panels, so `extract_filter()` only
+  does the filter half of routing (`llm.py`'s `route_query()` docstring).
 - **Evidence-grounded speculation** (`prove_or_abstain/evidence.py`) — on
   ASSERT, `speculate_causes()` is handed any operational events already
   logged for the winning segment and grounds a hypothesis in the most
@@ -484,6 +488,7 @@ GET  /                     demo page
 POST /investigate          built-in scenario: { "panel": "clean" | "diffuse" | "mixshift" | "deep", "autopilot": false, "mode": "graph" | "agent" }
 GET  /investigate/stream   Server-Sent Events: stream the investigation step by step (?panel=&autopilot=)
 POST /investigate/query    natural language: { "query": "why did conversion drop?", "previous_panel": "clean" }
+                           or, about a watched source instead: { "query": "...", "source_id": "my-dashboard-metric" }
 POST /investigate/suggest  setup helper: upload a sample CSV, get back sum-vs-rate metric classification
 POST /investigate/upload   CSV upload (multipart: baseline + current)
 POST /investigate/sql      live database: { "dsn": "...", "baseline_query": "...", "current_query": "..." }

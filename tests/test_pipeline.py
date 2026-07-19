@@ -404,6 +404,43 @@ def test_guard_filter_rejects_values_outside_the_supplied_dims():
     assert _guard_filter({"dim": "segment", "segment": "paid"}, None) is None
 
 
+# --------------------------------------------- "ask" against a watched source
+def test_query_source_needs_two_observations():
+    from prove_or_abstain import memory
+    memory.reset()
+    r = client.post("/investigate/query", json={"query": "why?", "source_id": "onlyone"})
+    assert r.status_code == 400   # no observations at all yet
+
+    df = pd.DataFrame({"metric": ["conversion"], "segment": ["paid"], "n": [100], "c": [10]})
+    client.post("/sources/onlyone/observe", files={"panel": ("p.csv", _csv(df), "text/csv")})
+    r = client.post("/investigate/query", json={"query": "why?", "source_id": "onlyone"})
+    assert r.status_code == 400   # cold start only — nothing to compare against yet
+
+
+def test_query_source_filters_to_named_segment_via_examples():
+    """Reuses the real STEM/gender-majority finding (see the real-data tests
+    below) to prove "ask" can narrow an already-watched source to a segment
+    Qwen extracts from free text — same guarded mechanism as previous_panel,
+    just against one persisted dataset instead of 4 named ones."""
+    from pathlib import Path
+    from prove_or_abstain import memory
+    root = Path(__file__).resolve().parent.parent / "examples"
+    memory.reset()
+    client.post("/sources/majors_ask/observe",
+               files={"panel": ("nonstem.csv", (root / "real_majors_nonstem.csv").read_bytes(), "text/csv")})
+    unfiltered = client.post("/sources/majors_ask/observe",
+               files={"panel": ("stem.csv", (root / "real_majors_stem.csv").read_bytes(), "text/csv")}).json()
+
+    filtered = client.post("/investigate/query", json={
+        "query": "what about majority_women?", "source_id": "majors_ask",
+    }).json()
+    assert filtered["routing"]["filter"] == {"dim": "gender_majority", "segment": "majority_women"}
+    # only one segment left in the filtered data, so it trivially IS 100% of
+    # the move — unlike the unfiltered comparison's genuinely uncertain 0.01
+    assert filtered["gates"]["gender_majority"]["concentration"] == 1.0
+    assert unfiltered["gates"]["gender_majority"]["confidence"] < 0.1
+
+
 # ------------------------------------------------------------- setup suggestion
 def test_suggest_setup_flags_revenue_as_sum():
     from prove_or_abstain.llm import template_suggest_setup

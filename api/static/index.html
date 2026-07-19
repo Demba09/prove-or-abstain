@@ -273,10 +273,29 @@ footer a { color: var(--accent-strong); }
 
     <div class="divider"></div>
 
+    <p class="eyebrow">Watch a source — no baseline file needed</p>
+    <p class="field-label" style="margin:-4px 0 8px;">Send one observation at a time, tagged with an id you choose.
+      The first call for a new id only seeds it; every call after that is compared automatically to everything
+      persisted so far for that id — the baseline lives in the database, not in a file you re-upload. Columns
+      don't have to match <code>metric, dims..., n, c</code> exactly — Qwen maps unfamiliar ones.</p>
+    <div class="upload-row">
+      <div class="field">
+        <label class="field-label" for="sourceId">Source id — reuse it across calls to build history</label>
+        <input type="text" id="sourceId" placeholder="my-dashboard-metric" value="demo-source">
+      </div>
+      <div class="field">
+        <label class="field-label" for="observation">One observation — same long-panel shape, or a raw source</label>
+        <input type="file" id="observation" accept=".csv">
+      </div>
+      <button class="secondary" type="button" id="observeBtn">send observation</button>
+    </div>
+
+    <div class="divider"></div>
+
     <p class="eyebrow">Ask in plain English</p>
     <div class="query-row">
       <div class="field">
-        <label class="field-label" for="query">Qwen picks which panel to investigate — it never computes anything itself</label>
+        <label class="field-label" for="query" id="queryLabel">Qwen picks which built-in scenario to investigate — it never computes anything itself</label>
         <input type="text" id="query" placeholder="why did conversion drop uniformly last week?">
       </div>
       <button class="secondary" type="button" id="askBtn">ask</button>
@@ -286,10 +305,10 @@ footer a { color: var(--accent-strong); }
     <div class="divider"></div>
 
     <details class="advanced" id="advancedToggle">
-      <summary>Advanced — bring your own data (CSV, SQL, Google Sheets)</summary>
+      <summary>Advanced — upload two CSVs to compare directly</summary>
       <div class="advanced-body">
-
-        <p class="eyebrow" style="margin-top:8px;">Upload CSVs</p>
+        <p class="field-label" style="margin:8px 0;">A one-off comparison with no persisted history — for that,
+          use "Watch a source" above. Also reachable via SQL or Google Sheets; see <a href="/docs">API docs</a>.</p>
         <div class="upload-row">
           <div class="field">
             <label class="field-label" for="baseline">Baseline — columns: <code>metric, &lt;dimensions...&gt;, n, c</code></label>
@@ -301,61 +320,6 @@ footer a { color: var(--accent-strong); }
           </div>
           <button class="secondary" type="button" id="uploadBtn">investigate CSV</button>
         </div>
-
-        <div class="divider"></div>
-
-        <p class="eyebrow">Query a live database</p>
-        <div class="field">
-          <label class="field-label" for="dsn">Connection string — your own credentials, read-only queries only</label>
-          <input type="text" id="dsn" placeholder="postgresql://user:pass@host/db or sqlite:///demo.db">
-        </div>
-        <div class="upload-row" style="margin-top:10px;">
-          <div class="field">
-            <label class="field-label" for="baselineQuery">Baseline query — a single SELECT, long-panel columns</label>
-            <textarea id="baselineQuery" rows="2" placeholder="SELECT metric, segment, device, n, c FROM conversions WHERE period = 'last_month'"></textarea>
-          </div>
-          <div class="field">
-            <label class="field-label" for="currentQuery">Current query — same shape</label>
-            <textarea id="currentQuery" rows="2" placeholder="SELECT metric, segment, device, n, c FROM conversions WHERE period = 'this_month'"></textarea>
-          </div>
-          <button class="secondary" type="button" id="sqlBtn">investigate SQL</button>
-        </div>
-
-        <div class="divider"></div>
-
-        <p class="eyebrow">Read from Google Sheets</p>
-        <div class="upload-row">
-          <div class="field">
-            <label class="field-label" for="baselineSheet">Baseline sheet URL — shared as "anyone with the link"</label>
-            <input type="text" id="baselineSheet" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0">
-          </div>
-          <div class="field">
-            <label class="field-label" for="currentSheet">Current sheet URL — same long-panel columns</label>
-            <input type="text" id="currentSheet" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0">
-          </div>
-          <button class="secondary" type="button" id="sheetsBtn">investigate sheets</button>
-        </div>
-
-        <div class="divider"></div>
-
-        <p class="eyebrow">Watch a source — no baseline file needed</p>
-        <p class="field-label" style="margin:-4px 0 8px;">Send one observation at a time, tagged with an id you choose.
-          The first call for a new id only seeds it (nothing to compare against yet); every call after that is
-          compared automatically to everything persisted so far for that id — the baseline lives in the database,
-          not in a file you re-upload. Columns don't have to match <code>metric, dims..., n, c</code> exactly —
-          Qwen maps unfamiliar ones (see <code>examples/schema_mapping_seed.csv</code>).</p>
-        <div class="upload-row">
-          <div class="field">
-            <label class="field-label" for="sourceId">Source id — reuse it across calls to build history</label>
-            <input type="text" id="sourceId" placeholder="my-dashboard-metric" value="demo-source">
-          </div>
-          <div class="field">
-            <label class="field-label" for="observation">One observation — same long-panel shape, or a raw source</label>
-            <input type="file" id="observation" accept=".csv">
-          </div>
-          <button class="secondary" type="button" id="observeBtn">send observation</button>
-        </div>
-
       </div>
     </details>
 
@@ -415,13 +379,25 @@ footer a { color: var(--accent-strong); }
 
   <footer>
     Every number comes from pandas/numpy; the LLM only orders the dimensions to try, routes free-text
-    questions to a panel, and phrases the report. <a href="/docs">API docs</a>
+    questions to a panel or segment, and phrases the report. <a href="/docs">API docs</a>
   </footer>
 </main>
 
 <script>
 const $ = id => document.getElementById(id);
 let activePanel = null;
+let activeContext = null;   // {type:'panel', panel} | {type:'source', source_id} — what "ask" targets
+
+function updateQueryLabel() {
+  const label = $('queryLabel');
+  if (activeContext && activeContext.type === 'source') {
+    label.textContent = `Asking about watched source "${activeContext.source_id}" — Qwen only narrows it to a segment, it never computes anything itself`;
+  } else if (activeContext && activeContext.type === 'panel') {
+    label.textContent = `Asking about the "${activeContext.panel}" scenario — Qwen picks the panel/segment, it never computes anything itself`;
+  } else {
+    label.textContent = 'Qwen picks which built-in scenario to investigate — it never computes anything itself';
+  }
+}
 
 function setBusy(b) { document.querySelectorAll('button').forEach(x => x.disabled = b); }
 function fail(msg) { $('error').style.display = 'block'; $('error').textContent = msg; }
@@ -461,10 +437,13 @@ function runQuery() {
   const query = $('query').value.trim();
   if (!query) return fail('Type a question first.');
   $('routing').style.display = 'none';
+  const payload = {query, autopilot: $('autopilot').checked};
+  if (activeContext && activeContext.type === 'source') payload.source_id = activeContext.source_id;
+  else if (activeContext && activeContext.type === 'panel') payload.previous_panel = activeContext.panel;
   call('/investigate/query', {
     method: 'POST',
     headers: {'content-type': 'application/json'},
-    body: JSON.stringify({query, autopilot: $('autopilot').checked}),
+    body: JSON.stringify(payload),
   });
 }
 
@@ -477,35 +456,6 @@ function runUpload() {
   fd.append('current', curr);
   fd.append('autopilot', $('autopilot').checked);
   call('/investigate/upload', {method: 'POST', body: fd});
-}
-
-function runSql() {
-  const dsn = $('dsn').value.trim();
-  const baselineQuery = $('baselineQuery').value.trim();
-  const currentQuery = $('currentQuery').value.trim();
-  if (!dsn || !baselineQuery || !currentQuery) {
-    return fail('Fill in the connection string and both queries.');
-  }
-  setActiveTab(null);
-  call('/investigate/sql', {
-    method: 'POST',
-    headers: {'content-type': 'application/json'},
-    body: JSON.stringify({dsn, baseline_query: baselineQuery, current_query: currentQuery,
-                          autopilot: $('autopilot').checked}),
-  });
-}
-
-function runSheets() {
-  const baselineUrl = $('baselineSheet').value.trim();
-  const currentUrl = $('currentSheet').value.trim();
-  if (!baselineUrl || !currentUrl) return fail('Fill in both sheet URLs.');
-  setActiveTab(null);
-  call('/investigate/sheets', {
-    method: 'POST',
-    headers: {'content-type': 'application/json'},
-    body: JSON.stringify({baseline_url: baselineUrl, current_url: currentUrl,
-                          autopilot: $('autopilot').checked}),
-  });
 }
 
 function runObserve() {
@@ -522,7 +472,12 @@ function runObserve() {
 function render(b) {
   $('result').style.display = 'block';
 
-  if (b.routing) {
+  if (b.routing && b.routing.source_id) {
+    setActiveTab(null);
+    $('routing').style.display = 'block';
+    $('routing').textContent = `asked about source ${b.routing.source_id}` +
+      (b.routing.filter ? ` · filtered to ${b.routing.filter.dim}=${b.routing.filter.segment}` : ' · no segment named, using the full comparison');
+  } else if (b.routing) {
     setActiveTab(b.panel);
     $('routing').style.display = 'block';
     $('routing').textContent = `routed to panel ${b.panel}` +
@@ -554,6 +509,12 @@ function render(b) {
   }
   $('meta').innerHTML = metaParts.join(' &nbsp;·&nbsp; ');
   $('meta').className = 'verdict-meta' + (b.cold_start ? ' cold-start' : '');
+
+  // "ask" targets whatever just produced a real (non-cold-start) result —
+  // a watched source once it has something to compare, else a scenario.
+  if (b.source_id && !b.cold_start) activeContext = {type: 'source', source_id: b.source_id};
+  else if (b.panel) activeContext = {type: 'panel', panel: b.panel};
+  updateQueryLabel();
 
   const exhibits = $('exhibits');
   exhibits.innerHTML = '';
@@ -719,8 +680,6 @@ document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () =>
 $('askBtn').addEventListener('click', runQuery);
 $('query').addEventListener('keydown', e => { if (e.key === 'Enter') runQuery(); });
 $('uploadBtn').addEventListener('click', runUpload);
-$('sqlBtn').addEventListener('click', runSql);
-$('sheetsBtn').addEventListener('click', runSheets);
 $('observeBtn').addEventListener('click', runObserve);
 
 // ---------------------------------------------------------------- dashboard

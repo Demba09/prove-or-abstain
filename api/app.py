@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
-from prove_or_abstain import ingest, memory
+from prove_or_abstain import ingest, memory, reference
 from prove_or_abstain.agent_loop import investigate_agentic
 from prove_or_abstain.autopilot import get_dashboard, record_check, resolve_execution, get_executions
 from prove_or_abstain.connectors.gsheets import SheetError
@@ -89,6 +89,11 @@ class QueryRequest(BaseModel):
     # to ask a follow-up in the same conversation ("and on mobile only?")
     # instead of re-routing from scratch.
     previous_panel: Literal["clean", "diffuse", "mixshift", "deep"] | None = None
+    # Set this instead of previous_panel to ask about a "Watch a source" id
+    # (POST /sources/{id}/observe) rather than one of the 4 built-in panels —
+    # there's exactly one dataset in play, so Qwen only extracts a filter,
+    # it doesn't route. Needs >= 2 observations already recorded for the id.
+    source_id: str | None = None
 
 
 class SqlRequest(BaseModel):
@@ -206,9 +211,15 @@ def investigate_query(req: QueryRequest) -> dict:
     SELECT a (dim, segment) filter from the panel's known values (never
     invents one), and the same panel is filtered to it before re-running the
     unchanged pipeline. A single stateless call: the caller carries the
-    conversation, not the server."""
+    conversation, not the server.
+
+    Pass `source_id` instead of `previous_panel` to ask about a "Watch a
+    source" id (see _query_source) — there's one active dataset, not 4
+    named panels, so only the filter half of routing applies."""
     if not req.query.strip():
         raise HTTPException(400, "query must not be empty")
+    if req.source_id:
+        return _query_source(req)
     routed = get_client().route_query(req.query, _PANEL_DESCRIPTIONS, _METRICS,
                                       dims=_DIM_VALUES, previous_panel=req.previous_panel)
     base, curr = BASELINE, _PANELS[routed["panel"]]
@@ -223,6 +234,39 @@ def investigate_query(req: QueryRequest) -> dict:
         autopilot=req.autopilot,
     )
     return {"panel": routed["panel"], "routing": routed, **result}
+
+
+def _query_source(req: QueryRequest) -> dict:
+    """Ask a free-text question about a "Watch a source" id: re-run the
+    same comparison /sources/{id}/observe would have made for the latest
+    observation (pooled prior observations vs. the latest one), optionally
+    narrowed to a (dim, segment) Qwen extracts from the text. Needs >= 2
+    recorded observations — with only 1 (cold start), there's nothing yet
+    to compare, same as the /observe endpoint itself."""
+    observations = memory.get_observations(req.source_id)
+    if len(observations) < 2:
+        raise HTTPException(
+            400, f"source {req.source_id!r} has {len(observations)} observation(s) "
+                f"— send at least one more before asking a question about it")
+    dims = observations[-1]["dims"]
+    dim_values = {d: sorted(set(pd.concat([o["panel"] for o in observations])[d].dropna()))
+                 for d in dims}
+    filt = get_client().extract_filter(req.query, dim_values)
+
+    base = reference.pool_observations(observations[:-1])
+    curr = observations[-1]["panel"]
+    if filt:
+        base = base[base[filt["dim"]] == filt["segment"]]
+        curr = curr[curr[filt["dim"]] == filt["segment"]]
+
+    result = _run_investigation(
+        base, curr,
+        metrics=observations[-1]["metrics"],
+        dims=dims,
+        autopilot=req.autopilot,
+    )
+    routing = {"source_id": req.source_id, "filter": filt}
+    return {"source_id": req.source_id, "routing": routing, **result}
 
 
 @app.post("/investigate/suggest")
