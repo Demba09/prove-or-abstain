@@ -94,6 +94,15 @@ legend { padding: 0; margin: 0 0 10px; font-size: 11px; letter-spacing: .08em; t
 .switch input:checked + .track::after { transform: translateX(15px); }
 .switch input:focus-visible + .track { outline: 2px solid var(--focus); outline-offset: 2px; }
 
+.mode-select { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.mode-select .mode-label { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-right: 2px; }
+.mode-btn {
+  font: inherit; font-size: 12.5px; padding: 5px 11px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--paper); color: var(--muted);
+}
+.mode-btn:hover { border-color: var(--accent); }
+.mode-btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: #fff; font-weight: 600; }
+
 .divider { border-top: 1px solid var(--line); margin: 16px 0; }
 label.field-label { display: block; font-size: 12.5px; color: var(--muted); margin: 0 0 6px; }
 
@@ -222,6 +231,22 @@ details.trace summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 }
 .trace-log li::before { content: "› "; color: var(--accent); }
 
+.agent-trace { border: 1px solid var(--accent); border-radius: 8px; padding: 12px 14px; margin: 14px 0; }
+.agent-trace .tag { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--accent-strong); font-weight: 600; }
+.agent-trace .note { font-size: 12px; color: var(--muted); margin: 4px 0 10px; }
+.agent-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.agent-steps li {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px;
+  display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;
+}
+.agent-steps .n { color: var(--muted); min-width: 20px; }
+.agent-steps .call { color: var(--ink); }
+.agent-steps .call b { color: var(--accent-strong); }
+.agent-steps .tool-verdict { font-size: 10.5px; font-weight: 700; letter-spacing: .03em; padding: 1px 7px; border-radius: 999px; }
+.agent-steps .tool-verdict.assert { color: var(--assert); background: var(--assert-bg); }
+.agent-steps .tool-verdict.abstain { color: var(--abstain); background: var(--abstain-bg); }
+.agent-steps .swept { font-size: 10.5px; color: var(--muted); font-style: italic; }
+
 footer { color: var(--muted); font-size: 12.5px; margin-top: 26px; line-height: 1.7; }
 footer a { color: var(--accent-strong); }
 .advanced { margin-top: 0; font-size: 14px; }
@@ -269,6 +294,11 @@ footer a { color: var(--accent-strong); }
         <span class="track"></span>
         autopilot (execute at confidence &ge; 0.70)
       </label>
+      <span class="mode-select" role="group" aria-label="Orchestration mode">
+        <span class="mode-label">orchestration</span>
+        <button type="button" class="mode-btn" id="mode-graph" data-mode="graph" aria-pressed="true">graph</button>
+        <button type="button" class="mode-btn" id="mode-agent" data-mode="agent" aria-pressed="false">agent (Qwen drives)</button>
+      </span>
     </div>
 
     <div class="divider"></div>
@@ -359,6 +389,8 @@ footer a { color: var(--accent-strong); }
 
     <div class="spec" id="spec" style="display:none;"></div>
 
+    <div class="agent-trace" id="agentTrace" style="display:none;"></div>
+
     <details class="trace">
       <summary>investigation trace</summary>
       <ol class="trace-log" id="trace"></ol>
@@ -387,6 +419,13 @@ footer a { color: var(--accent-strong); }
 const $ = id => document.getElementById(id);
 let activePanel = null;
 let activeContext = null;   // {type:'panel', panel} | {type:'source', source_id} — what "ask" targets
+let orchestrationMode = 'graph';   // 'graph' (fixed pipeline) | 'agent' (Qwen drives via tool calls)
+
+function setMode(mode) {
+  orchestrationMode = mode;
+  $('mode-graph').setAttribute('aria-pressed', String(mode === 'graph'));
+  $('mode-agent').setAttribute('aria-pressed', String(mode === 'agent'));
+}
 
 function updateQueryLabel() {
   const label = $('queryLabel');
@@ -429,7 +468,7 @@ function runPanel(panel) {
   call('/investigate', {
     method: 'POST',
     headers: {'content-type': 'application/json'},
-    body: JSON.stringify({panel, autopilot: $('autopilot').checked}),
+    body: JSON.stringify({panel, autopilot: $('autopilot').checked, mode: orchestrationMode}),
   });
 }
 
@@ -466,6 +505,7 @@ function runObserve() {
   const fd = new FormData();
   fd.append('panel', obs);
   fd.append('autopilot', $('autopilot').checked);
+  fd.append('mode', orchestrationMode);
   call(`/sources/${encodeURIComponent(sourceId)}/observe`, {method: 'POST', body: fd});
 }
 
@@ -562,7 +602,37 @@ function render(b) {
 
   $('trace').innerHTML = (b.trace || []).map(t => `<li>${t}</li>`).join('');
 
+  renderAgentTrace(b.agent_trace || [], b.llm);
+
   showDataset(b);
+}
+
+function renderAgentTrace(steps, llm) {
+  const box = $('agentTrace');
+  if (!steps.length) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  // In mock/fallback mode the loop is a deterministic replay of the same
+  // tool-call structure; only a real key means Qwen actually chose the path.
+  const isReal = llm && llm.mode === 'real';
+  const note = isReal
+    ? `Qwen chose each call below via tool-calling. A determinism guard re-checks every untested dimension before concluding, so the verdict is identical to graph mode — Qwen drove the path, not the outcome.`
+    : `Offline replay (<code>${llm ? llm.mode : 'mock'}</code>): the same tool-call structure Qwen would drive, run deterministically. With a real <code>DASHSCOPE_API_KEY</code> these become Qwen's own choices — same verdict either way.`;
+
+  const rows = steps.map(s => {
+    const dim = s.arguments && s.arguments.dimension;
+    const v = s.result && s.result.verdict;
+    const badge = v ? `<span class="tool-verdict ${v.toLowerCase()}">${v}</span>` : '';
+    const swept = s.mode === 'determinism-sweep' ? `<span class="swept">determinism guard</span>` : '';
+    const callText = dim
+      ? `<b>${s.tool}</b>(${dim})`
+      : `<b>${s.tool}</b>(${Object.values(s.arguments || {}).join(', ')})`;
+    return `<li><span class="n">${s.step}.</span><span class="call">${callText}</span>${badge}${swept}</li>`;
+  }).join('');
+
+  box.innerHTML =
+    `<div class="tag">Qwen's tool-call trace — agent mode</div>
+     <p class="note">${note}</p>
+     <ol class="agent-steps">${rows}</ol>`;
 }
 
 // -------------------------------------------------------------- dataset viz
@@ -677,6 +747,8 @@ async function showDataset(body) {
 }
 
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => runPanel(t.dataset.panel)));
+$('mode-graph').addEventListener('click', () => setMode('graph'));
+$('mode-agent').addEventListener('click', () => setMode('agent'));
 $('askBtn').addEventListener('click', runQuery);
 $('query').addEventListener('keydown', e => { if (e.key === 'Enter') runQuery(); });
 $('uploadBtn').addEventListener('click', runUpload);

@@ -44,18 +44,17 @@ the agent will always fabricate a plausible-sounding diagnosis — right or wron
 | Requirement | Implementation |
 |-------------|----------------|
 | **Handle ambiguous inputs** | `/investigate/query` routes free-text questions; `map_schema()` reshapes an unfamiliar raw source's columns for "Watch a source" |
-| **Qwen orchestrates via tool calls** | `mode="agent"` — Qwen drives the investigation through function calling (`agent_loop.py`), math still decides |
+| **Qwen orchestrates via tool calls** | `mode="agent"` (toggle in the demo) — Qwen drives the investigation through function calling (`agent_loop.py`), math still decides |
 | **Invoke external tools** | SQL connector, Google Sheets connector, CSV upload, time series, continuous source ingestion |
 | **Continuous autonomy** | `monitor.py` watches sources, investigates on movement, persists a durable baseline, alerts |
 | **Human-in-the-loop checkpoints** | ABSTAIN always escalates; autopilot requires confidence ≥ 0.70 to execute; alerts resolvable |
-| **Provable, not just a demo** | 30-scenario benchmark (100%, 0% false-ASSERT) plus 2 real external datasets, ECE calibration, reproducible audit trails, per-request cost |
-| **Production-ready** | Docker, CI, 90 tests, SQLite persistence, SSE streaming, API docs at `/docs` (ReDoc) |
+| **Provable, not just a demo** | 30-scenario benchmark (100%, 0% false-ASSERT) plus 3 real external datasets, ECE calibration, reproducible audit trails, per-request cost |
+| **Production-ready** | Docker, CI, 95 tests, SQLite persistence, SSE streaming, API docs at `/docs` (ReDoc) |
 
-**Qwen Cloud integration:** `prove_or_abstain/llm.py` calls Qwen via DashScope for dimension ordering,
-report phrasing, query routing, and — the one deliberate exception — mapping an unfamiliar raw
-source's columns. Everywhere else, the math (pandas, numpy) and statistics (z-test, p ≤ 0.01) run
-independently and the verdict is **identical** with or without the LLM — `QWEN_MOCK=1` proves this.
-See "Where Qwen actually earns its keep" below for the full picture, including that one exception.
+Qwen (via DashScope) orders dimensions, phrases reports, routes questions, and — the one
+deliberate exception — maps an unfamiliar source's columns. Everywhere else the math decides,
+verdict-identical with or without the LLM (`QWEN_MOCK=1` proves it). Details in
+[Where Qwen actually earns its keep](#where-qwen-actually-earns-its-keep).
 
 ---
 
@@ -103,9 +102,10 @@ QWEN_MOCK=1 uvicorn api.app:app --reload
 ```
 
 The demo page lets you run the 4 built-in scenarios (clean, diffuse, mixshift, deep),
-watch a source with no baseline file, or ask questions in plain English — about whichever of
-those you last ran. CSV upload, SQL, and Google Sheets remain available (see the API table below);
-the page itself only surfaces CSV upload, to keep the primary flow to what a first look needs.
+watch a source with no baseline file, or ask questions in plain English about whichever you
+last ran. A **graph / agent** toggle switches between the fixed pipeline and Qwen orchestrating
+the investigation via tool calls — the trace of its calls shows below the verdict, and the
+verdict is identical either way. (CSV/SQL/Sheets upload also available — see the API table.)
 
 ![architecture](docs/architecture.svg)
 
@@ -123,10 +123,10 @@ The agent is a LangGraph state machine with seven nodes and one conditional loop
 | actuator | maps the verdict to a typed action: recommend, execute, or escalate |
 | reporter | writes the conclusion and keeps the full audit trail |
 
-**Division of labour:** All numbers come from pandas/numpy. The LLM (Qwen via DashScope)
-does three things only: suggests the order of dimensions, writes the report from computed
-figures, and — on ASSERT — offers business hypotheses explicitly labelled as speculation.
-It never produces a number and never decides a verdict.
+**Division of labour:** All numbers come from pandas/numpy. Qwen (via DashScope) orders
+dimensions, phrases the report, routes questions, and offers labelled speculation — never a
+number, never a verdict. The one place its judgment can change an outcome (`map_schema()`) is
+called out explicitly below.
 
 ### Two orchestration modes
 
@@ -145,19 +145,13 @@ early — every untested dimension is checked deterministically before
 concluding. Offline (`QWEN_MOCK=1` or no key), the loop is replayed
 deterministically and reproduces the graph exactly.
 
-**One honest nuance, found by actually running this against a live key (not
-just mock):** when a single narrow cell collapses (the `deep` scenario — a
-1-cell anomaly on a 2-dimension grid), it mathematically concentrates 100%
-on *both* of its defining dimensions at once — not a calibration accident,
-an inevitable property of a single-cell anomaly. Qwen's chosen test order
-then decides which one is reported as the top-level `root_cause` and which
-one shows up as the `drilldown.refined` detail — e.g. a live run ordered
-`segment` before `device` and reported `segment=paid` with `device=mobile`
-as the refinement, where the mock default order reports `device=mobile` on
-top with `segment=paid` refined. **The full diagnosis is recovered either
-way** — same cell, same two values, nothing lost or invented — only which
-of the two labels sits on top can depend on Qwen's ordering. The benchmark
-(below) credits a match on either field for exactly this reason.
+**One honest nuance, found by running this against a live key:** when a
+single narrow cell collapses (the `deep` scenario), it concentrates 100% on
+*both* of its defining dimensions at once. Qwen's test order then decides
+which is the top-level `root_cause` and which is the `drilldown.refined`
+detail — but the drill-down always recovers the other, so the full
+diagnosis is never lost, only relabelled. The benchmark below credits a
+match on either field for this reason.
 
 ### Where Qwen actually earns its keep
 
@@ -255,18 +249,11 @@ Qwen's orchestration can't change a verdict. The critical number is
 **false-ABSTAIN = 0% paired with false-ASSERT = 0%**: the agent never misses a
 real, localizable cause, and never invents one that isn't there.
 
-**What this 100% proves, and what it doesn't.** Every scenario here is
-constructed clearly on one side of the 4 gate thresholds (`MATERIAL_REL`,
-`CONCENTRATION_MIN`, `SIGNIFICANCE_ALPHA`, `INTERACTION_MAX` in
-`gates.py`) — none sits at the exact boundary. So 100% is solid evidence the
-code correctly implements its own documented rules (a regression test, and
-a real one), not evidence of correct behaviour on genuinely ambiguous real
-data or right at a threshold. That's what "Tested against real data" below
-is for. On the `deep` category specifically, the grading credits a match on
-either the top-level cause or the drill-down's `refined` cause — see "Two
-orchestration modes" above for why: a single-cell anomaly concentrates 100%
-on both its defining dimensions, so whichever Qwen tests first becomes the
-headline and the driller always finds the other, never losing the diagnosis.
+**What this 100% proves, and what it doesn't.** Every scenario is built
+clearly on one side of the 4 gate thresholds — none sits at the exact
+boundary. So 100% proves the code correctly implements its own documented
+rules (a real regression test), not correct behaviour on genuinely
+ambiguous data. That's what "Tested against real data" below is for.
 
 ### vs. a raw LLM
 
@@ -339,34 +326,19 @@ Two honest limits on what these three prove:
    into `run_benchmark()`'s accuracy would reintroduce exactly the
    circularity the benchmark otherwise avoids, so they stay separate tests,
    never part of the 30/30.
-2. **Two of the three don't test Qwen's reliability at all** — flights and
-   Titanic are sent already in the clean long-panel shape (`metric`, `n`,
-   `c`), so `map_schema()` never runs. The college-majors `_raw.csv` variant
-   closes that gap partway: real, unrenamed columns (`Employed` isn't in
-   `template_map_schema()`'s keyword list, so the deterministic mock
-   heuristic genuinely can't solve it — confirmed by
-   `test_real_college_majors_raw_columns_need_qwens_schema_mapping`,
-   which asserts the mock path 400s) finally makes this a fair test of
-   judgment, not math. What we verified here is that the downstream verdict
-   is correct on this exact real data once mapped correctly — proving the
-   math side, not Qwen's live answer. Confirming Qwen itself resolves it
-   needs a real `DASHSCOPE_API_KEY`, not available in every environment
-   this runs in:
+2. **Only the college-majors `_raw.csv` variant tests Qwen's judgment.**
+   Flights and Titanic arrive already in the clean `metric`/`n`/`c` shape, so
+   `map_schema()` never runs — they exercise the math against real noise, not
+   the LLM. The `_raw.csv` columns (`Field`, `Group`, `Total`, `Employed`)
+   genuinely defeat the deterministic mock heuristic (a test asserts it
+   `400`s), so mapping them is a fair test of judgment. We've verified the
+   verdict is correct *once mapped*; confirming Qwen maps it live needs a real
+   key:
    ```bash
-   DASHSCOPE_API_KEY=sk-... python -c "
-   from prove_or_abstain.llm import get_client
-   print(get_client().map_schema(
-       ['Field', 'Group', 'Total', 'Employed'],
-       [{'Field': 'Employment', 'Group': 'majority_men', 'Total': 1660894, 'Employed': 1327119}]))"
-   # then, with the API running and DASHSCOPE_API_KEY exported:
-   curl -X POST localhost:8000/sources/majors/observe -F panel=@examples/real_majors_nonstem_raw.csv
-   curl -X POST localhost:8000/sources/majors/observe -F panel=@examples/real_majors_stem_raw.csv
+   DASHSCOPE_API_KEY=sk-... curl -X POST localhost:8000/sources/majors/observe -F panel=@examples/real_majors_nonstem_raw.csv
+   DASHSCOPE_API_KEY=sk-... curl -X POST localhost:8000/sources/majors/observe -F panel=@examples/real_majors_stem_raw.csv
+   # expect the 2nd call: ASSERT / Group=majority_women — same finding as the pre-renamed CSVs
    ```
-   Expect `map_schema()` to return `n_column: Total`, `c_column: Employed`,
-   `metric_column: Field`, and the second `/observe` call to come back
-   `ASSERT` / `Group: majority_women` — the same finding as the pre-renamed
-   CSVs above (the dimension keeps its original raw name; only `metric`/
-   `n`/`c` get relabeled).
 
 ## Calibration
 
@@ -435,8 +407,8 @@ prove_or_abstain/   core package — the deterministic pipeline
 api/                deployment entry point — FastAPI app + static demo page (SSE stream)
 mcp_server.py       MCP entry point for Qwen Cloud agents
 scripts/            validation & demo tooling (see below)
-tests/              pytest suite (88 tests, runs offline with QWEN_MOCK=1)
-examples/           sample CSVs — synthetic (planted ground truth) + 2 real public datasets
+tests/              pytest suite (95 tests, runs offline with QWEN_MOCK=1)
+examples/           sample CSVs — synthetic (planted ground truth) + 3 real public datasets
 docs/               architecture diagram, demo script, devpost text
 ```
 
