@@ -245,8 +245,11 @@ prove_or_abstain/   core package — the deterministic pipeline
   llm.py              the Qwen boundary (mock mode, routing, wording, tools)
   panels.py           built-in demo scenarios
   autopilot.py        execution tracker (adapter over memory.py)
-  memory.py           SQLite persistence — investigation history + alerts
+  memory.py           SQLite persistence — investigations, alerts, watched-source observations
   monitor.py          continuous autonomous surveillance loop
+  reference.py        pools a watched source's prior observations into a baseline
+  ingest.py           "Watch a source" entry point (ingest_and_investigate)
+  investigate.py      shared state-building/graph-invocation tail (api/app.py + ingest.py)
   webhook.py          outbound notifications on EXECUTE
   cost_tracker.py     token counting + cost estimation
   benchmark.py        30 ground-truth scenarios + cross-model eval
@@ -257,8 +260,8 @@ prove_or_abstain/   core package — the deterministic pipeline
 api/                deployment entry point — FastAPI app + static demo page (SSE stream)
 mcp_server.py       MCP entry point for Qwen Cloud agents
 scripts/            validation & demo tooling (see below)
-tests/              pytest suite (64 tests, runs offline with QWEN_MOCK=1)
-examples/           sample CSVs for the upload endpoints
+tests/              pytest suite (88 tests, runs offline with QWEN_MOCK=1)
+examples/           sample CSVs for the upload / watch-a-source endpoints
 docs/               architecture diagram, demo script, devpost text
 ```
 
@@ -316,12 +319,42 @@ POST /investigate/sql      live database: { "dsn": "...", "baseline_query": "...
 POST /investigate/sheets   live Google Sheets: { "baseline_url": "...", "current_url": "..." }
 POST /investigate/series   time series (multipart: series.csv + window)
 POST /investigate/check    autonomous monitor — runs all panels, auto-executes on high confidence
+POST /sources/{id}/observe       "Watch a source": send ONE observation, compared to its persisted history
+GET  /sources/{id}/observations  read-only: the observation history accumulated for a source
 GET  /panels/{name}        schema reference for SQL/Sheets/CSV
 GET  /dashboard            autopilot status, active alerts, uptime
 GET  /executions           audit trail of all EXECUTE actions
 POST /executions/{id}/resolve  human resolves an active alert
 GET  /health               healthcheck
 ```
+
+### Two ways to compare: a snapshot, or a watched source
+
+Every `/investigate*` endpoint above is **"Compare two snapshots"**: you
+supply both a baseline and a current dataset yourself, for a one-off
+comparison ("last month vs this month") — no history required. That's the
+right tool for the flagship scenario at the top of this README: a PM asking
+"what happened?" on data that was never ingested before.
+
+**`POST /sources/{source_id}/observe` is a different capability: "Watch a
+source".** You send ONE observation, tagged with an id you choose. No
+baseline file:
+
+- **1st call for a `source_id`** — nothing to compare against yet, so it
+  only seeds: `{"cold_start": true, "verdict": "BASELINE_SET"}`.
+- **Every call after that** — compared automatically against a pooled
+  window of every prior observation persisted for that `source_id`
+  (`prove_or_abstain/memory.py`'s `observations` table + `reference.py`'s
+  pooling, the same summed-counts algebra as `panels.py::split_series`, kept
+  z-test-valid). The baseline lives in the database and grows with each
+  call — nothing to re-supply.
+
+`monitor.py`'s continuous surveillance loop is built on this same mechanism
+(`prove_or_abstain/ingest.py::ingest_and_investigate`), so a restarted
+process picks its history back up instead of losing it.
+
+If the columns you send don't already match the long-panel contract
+(`[metric, dims..., n, c]`), `map_schema()` (below) reshapes them first.
 
 ### Where Qwen's contribution stops being decorative
 
@@ -354,22 +387,47 @@ actually beats a fixed rule:
   table standing in for a real calendar/deploy-log integration (see
   "What's next").
 
+**One deliberate exception to "same verdict, mock or real": `map_schema()`.**
+Everything above is provably LLM-independent — `QWEN_MOCK=1` reproduces the
+identical verdict, because the math tests every option, or Qwen only picks
+among values already known to be valid. `map_schema()` (used by
+`POST /sources/{id}/observe` when a raw source's columns don't already match
+`[metric, dims..., n, c]`) is different on purpose: it decides which column
+*is* `n`, which is `c`, which are dimensions — the shape of the data feeding
+the calculation, not its order or its wording. Interpreting ambiguous
+column names has no single mechanically-deducible answer, so the result can
+genuinely differ between mock and real mode here. Rather than hide that
+behind a human-confirmation step (which would make Qwen's contribution
+decorative again), its decision is used directly: real mode runs it in
+**two passes**, a proposal and then a
+self-verification pass where Qwen re-examines its own answer against the
+sample rows and may correct it (`self_verified: false` when it does — see
+`test_map_schema_self_verification_corrects_first_pass`). Whatever mapping
+comes out, mock or real, still passes through the same `_validate_panel`/
+`_validate_rate_counts` every other data source goes through, so an
+incoherent mapping is rejected before it reaches `gates.py` — a
+deterministic backstop, not a human one.
+
 ## Autonomous monitoring, persistence & audit
 
 The Track-4 autopilot is a continuous loop, not just an endpoint:
 
 - **`monitor.py`** — `MetricMonitor` watches a set of sources (SQL / Sheets /
-  CSV / inline), and every cycle fetches the current panel, compares it to the
-  rolling baseline, and on a material move runs the investigation, persists the
-  verdict, and fires the webhook on a confident ASSERT. One broken feed never
-  kills the loop.
+  CSV / inline). Every cycle it hands the fetched panel to
+  `ingest_and_investigate()` ("Watch a source", above) — no more in-process
+  snapshot dict lost on restart: the reference window is pooled from
+  `memory.py`'s persisted `observations` table, durable across restarts. On
+  a material move it runs the investigation and, on a confident ASSERT,
+  records the alert and fires the webhook. One broken feed never kills the
+  loop, and a broken source never corrupts another source's history.
 
   ```bash
   python -m prove_or_abstain.monitor          # one demo cycle on a built-in panel
   ```
 
 - **`memory.py`** — SQLite persistence (`PROBATIO_DB`, default `:memory:`) for
-  the full investigation history and deduplicated active alerts. `autopilot.py`
+  the full investigation history, deduplicated active alerts, and every
+  observation ever ingested for a watched source. `autopilot.py`
   is a thin adapter over it, so `/dashboard`, `/executions` and
   `/executions/{id}/resolve` are backed by a real store.
 
@@ -385,16 +443,19 @@ The Track-4 autopilot is a continuous loop, not just an endpoint:
      SQL · Sheets · CSV · inline                  orchestrates + phrases
                  │                                        │ tool calls
                  ▼                                        ▼
-   monitor.py ──────────────►  agent_loop / graph  ◄── gates decide the verdict
-   (rolling baseline,          detector→investigate      (pure pandas/numpy)
-    ≥2% triggers)              →verify→drill→act              │
-                 │                     │                      │
-                 ▼                     ▼                      ▼
-        memory.py (SQLite)     webhook.notify          audit.py (SHA256 trail
-     history + active alerts   Slack/Discord/Teams        + verify_replay)
-                 │                                     cost_tracker.py ($/tokens)
-                 ▼
-     /dashboard · /executions · SSE /investigate/stream
+   monitor.py ──► ingest.py ──►  agent_loop / graph  ◄── gates decide the verdict
+   /sources/{id}/observe        detector→investigate      (pure pandas/numpy)
+   (ingest_and_investigate,     →verify→drill→act              │
+    ≥2% triggers)                     │                        │
+                 │                    │                        │
+                 ▼                    ▼                        ▼
+        memory.py (SQLite: investigations, alerts,       audit.py (SHA256 trail
+        observations) ──► reference.py (pooled            + verify_replay)
+        window, persisted across restarts)          cost_tracker.py ($/tokens)
+                 │                    │
+                 ▼                    ▼
+     /dashboard · /executions   webhook.notify
+     SSE /investigate/stream    Slack/Discord/Teams
 ```
 
 ## Bring your own data
@@ -510,6 +571,15 @@ report phrasing, and query routing only. The math (pandas, numpy) and statistics
 - Downstream actions wired to real systems (Slack alerts, feature flags, campaign pausing)
 - `evidence.py`'s embedded table replaced by a real calendar/deploy-log/ticketing integration
 - Multi-turn `/investigate/query` beyond a single filtered follow-up (a real conversation, not one filter)
+- Configurable/adaptive `window` for "Watch a source" — today it defaults to
+  pooling ALL prior observations (like `split_series`'s default), which can
+  make an old baseline increasingly insensitive to a genuine recent shift on
+  a long-running source; a sane default window size, or an EWMA-style decay,
+  is worth revisiting once a source has real production history behind it
+- `map_schema()`'s raw-source mapping doesn't yet handle a source with no
+  identifiable metric column at all (single implicit metric) — out of scope
+  for the current schema-mapping example, which keeps `metric` well-named on
+  purpose to isolate the dims/n/c ambiguity
 
 ## License
 

@@ -770,10 +770,15 @@ def test_monitor_detects_and_records():
     from prove_or_abstain.monitor import MetricMonitor
     from prove_or_abstain.panels import BASELINE, CLEAN
     memory.reset()
-    mon = MetricMonitor(sources=[{
-        "type": "inline", "config": {"baseline": BASELINE, "current": CLEAN},
-        "metrics": ["conversion", "activation"], "dims": ["device", "segment"]}])
-    out = _run(mon.check_once())
+    source = {
+        "type": "inline", "config": {"current": BASELINE},
+        "metrics": ["conversion", "activation"], "dims": ["device", "segment"]}
+    mon = MetricMonitor(sources=[source])
+    first = _run(mon.check_once())               # cold start: nothing to compare yet
+    assert first[0]["verdict"] == "BASELINE_SET"
+
+    source["config"]["current"] = CLEAN
+    out = _run(mon.check_once())                 # compares against the persisted reference
     assert out[0]["verdict"] == "ASSERT" and out[0]["cause"] == "segment=paid"
     assert len(memory.get_history()) == 1
     assert len(memory.get_active_alerts()) == 1   # confident ASSERT -> alert
@@ -801,6 +806,195 @@ def test_monitor_survives_bad_source():
         "metrics": ["conversion"], "dims": ["device"]}])
     out = _run(mon.check_once())          # must not raise
     assert "error" in out[0]
+
+
+def test_monitor_broken_source_does_not_corrupt_the_healthy_ones_history():
+    """One source fails every cycle; the other must keep accumulating its
+    own persisted observation history unaffected (proves 'Watch a source'
+    persistence, not just an in-memory dict, survives partial failures)."""
+    from prove_or_abstain import memory
+    from prove_or_abstain.monitor import MetricMonitor
+    from prove_or_abstain.panels import BASELINE, CLEAN
+    memory.reset()
+    good = {"type": "inline", "config": {"current": BASELINE},
+            "metrics": ["conversion"], "dims": ["device", "segment"],
+            "source_id": "good"}
+    bad = {"type": "csv", "config": {"path": "/nonexistent/nope.csv"},
+          "metrics": ["conversion"], "dims": ["device"], "source_id": "bad"}
+    mon = MetricMonitor(sources=[good, bad])
+
+    first = _run(mon.check_once())
+    assert first[0]["verdict"] == "BASELINE_SET" and "error" in first[1]
+    assert memory.count_observations("good") == 1
+
+    good["config"]["current"] = CLEAN
+    second = _run(mon.check_once())
+    assert second[0]["verdict"] == "ASSERT" and "error" in second[1]
+    assert memory.count_observations("good") == 2   # unaffected by "bad"'s failures
+
+
+# --------------------------------------------------- watch a source (ingestion)
+
+def test_source_cold_start_seeds_without_a_verdict():
+    from prove_or_abstain import memory
+    from prove_or_abstain.panels import BASELINE
+    memory.reset()
+    r = client.post("/sources/coldtest/observe",
+                    files={"panel": ("baseline.csv", _csv(BASELINE), "text/csv")})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["cold_start"] is True
+    assert body["verdict"] == "BASELINE_SET"
+    assert memory.count_observations("coldtest") == 1
+
+
+def test_reference_window_pools_prior_observations_like_split_series():
+    """Pooling oracle: N observations of the same shape sum their raw counts
+    cell-by-cell, exactly like panels.py::split_series's window pooling —
+    the algebra this function deliberately duplicates (see reference.py)."""
+    from prove_or_abstain import memory, reference
+    memory.reset()
+    obs = pd.DataFrame([{"metric": "conversion", "segment": "paid", "n": 1000, "c": 70},
+                        {"metric": "conversion", "segment": "organic", "n": 2000, "c": 100}])
+    for _ in range(3):
+        memory.record_observation("pooltest", obs, ["segment"], ["conversion"])
+
+    pooled = reference.build_reference_window("pooltest", ["segment"])
+    pooled = pooled.set_index("segment")
+    assert pooled.loc["paid", "n"] == 3000 and pooled.loc["paid", "c"] == 210
+    assert pooled.loc["organic", "n"] == 6000 and pooled.loc["organic", "c"] == 300
+
+
+def test_reference_window_respects_window_size():
+    from prove_or_abstain import memory, reference
+    memory.reset()
+    for n in (1000, 2000, 3000):
+        obs = pd.DataFrame([{"metric": "conversion", "segment": "paid", "n": n, "c": n // 10}])
+        memory.record_observation("windowtest", obs, ["segment"], ["conversion"])
+
+    all_pooled = reference.build_reference_window("windowtest", ["segment"])
+    last_one = reference.build_reference_window("windowtest", ["segment"], window=1)
+    assert all_pooled["n"].iloc[0] == 6000          # 1000+2000+3000
+    assert last_one["n"].iloc[0] == 3000             # only the most recent
+
+
+def test_reference_window_raises_with_no_prior_observations():
+    from prove_or_abstain import memory, reference
+    memory.reset()
+    with pytest.raises(ValueError):
+        reference.build_reference_window("never-seen", ["segment"])
+
+
+def test_watch_a_source_end_to_end_localizes_paid():
+    from prove_or_abstain import memory
+    from prove_or_abstain.panels import BASELINE, CLEAN
+    memory.reset()
+    client.post("/sources/e2e/observe",
+               files={"panel": ("b.csv", _csv(BASELINE), "text/csv")})
+    r = client.post("/sources/e2e/observe",
+                    files={"panel": ("c.csv", _csv(CLEAN), "text/csv")})
+    body = r.json()
+    assert body["cold_start"] is False
+    assert body["verdict"] == "ASSERT"
+    assert body["root_cause"] == {"dimension": "segment", "segment": "paid"}
+
+
+def test_memory_reset_wipes_observations():
+    from prove_or_abstain import memory
+    memory.reset()
+    df = pd.DataFrame([{"metric": "conversion", "segment": "paid", "n": 100, "c": 10}])
+    memory.record_observation("wipeme", df, ["segment"], ["conversion"])
+    assert memory.count_observations("wipeme") == 1
+    memory.reset()
+    assert memory.count_observations("wipeme") == 0
+
+
+# --------------------------------------------------- schema mapping (Qwen)
+
+def test_map_schema_never_invents_a_column_name():
+    from prove_or_abstain.llm import QwenClient
+    cols = ["category", "platform", "total_users", "total_conversions"]
+    bad = {"metric_column": "nonexistent", "n_column": "total_users",
+          "c_column": "made_up", "dim_columns": ["category", "invented_dim"]}
+    out = QwenClient._guarded_schema_mapping(bad, cols)
+    assert out["metric_column"] is None
+    assert out["c_column"] is None
+    assert out["n_column"] == "total_users"
+    assert set(out["dim_columns"]) == {"category"}
+
+
+def test_map_schema_mock_identifies_standard_columns():
+    from prove_or_abstain.llm import template_map_schema
+    cols = ["metric", "category", "platform", "total_users", "total_conversions"]
+    out = template_map_schema(cols, [])
+    assert out["metric_column"] == "metric"
+    assert out["n_column"] == "total_users"
+    assert out["c_column"] == "total_conversions"
+    assert set(out["dim_columns"]) == {"category", "platform"}
+    assert out["self_verified"] is True
+
+
+def test_map_schema_self_verification_corrects_first_pass(monkeypatch):
+    """Real-mode map_schema is 2 passes: propose, then self-verify. This
+    simulates a first pass that swaps n/c by mistake, and a second pass
+    that catches and corrects it — proving map_schema() returns the
+    CORRECTED mapping, not the first guess."""
+    import json as _json
+    from prove_or_abstain.llm import QwenClient
+
+    responses = [
+        _json.dumps({"dim_columns": ["category", "platform"], "metric_column": "metric",
+                     "n_column": "total_conversions", "c_column": "total_users",
+                     "reason": "first guess"}),
+        _json.dumps({"dim_columns": ["category", "platform"], "metric_column": "metric",
+                     "n_column": "total_users", "c_column": "total_conversions",
+                     "self_verified": False, "reason": "corrected an n/c swap"}),
+    ]
+    calls = {"i": 0}
+
+    def fake_complete(self, system, user, **kw):
+        i = calls["i"]
+        calls["i"] += 1
+        return responses[i]
+
+    monkeypatch.setattr(QwenClient, "complete", fake_complete)
+    qc = QwenClient(mock=False, model="stub")
+    out = qc.map_schema(
+        ["metric", "category", "platform", "total_users", "total_conversions"],
+        [{"metric": "conversion", "category": "paid", "platform": "mobile",
+          "total_users": 3000, "total_conversions": 210}])
+    assert calls["i"] == 2                    # both passes actually ran
+    assert out["n_column"] == "total_users"    # the CORRECTED mapping, not the first
+    assert out["c_column"] == "total_conversions"
+    assert out["self_verified"] is False
+
+
+def test_schema_mapping_rejects_incoherent_mapping_before_the_math():
+    """Data map_schema can't make sense of (no metric/n/c hints at all) is
+    rejected by _validate_panel before it ever reaches gates.py — mock or
+    real, the deterministic backstop is the same."""
+    df = pd.DataFrame({"foo": ["a", "b"], "bar": ["c", "d"], "baz": [1, 2]})
+    r = client.post("/sources/badmapping/observe",
+                    files={"panel": ("bad.csv", _csv(df), "text/csv")})
+    assert r.status_code == 400
+
+
+def test_schema_mapping_end_to_end_via_examples(tmp_path):
+    """examples/schema_mapping_seed.csv + _next.csv: non-standard column
+    names (category/platform/total_users/total_conversions), mapped via
+    map_schema() (mock mode) onto the long-panel contract, localizing to
+    the same paid-segment collapse as panels.CLEAN."""
+    from prove_or_abstain import memory
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent / "examples"
+    memory.reset()
+    seed = (root / "schema_mapping_seed.csv").read_bytes()
+    nxt = (root / "schema_mapping_next.csv").read_bytes()
+    client.post("/sources/rawschema/observe", files={"panel": ("seed.csv", seed, "text/csv")})
+    r = client.post("/sources/rawschema/observe", files={"panel": ("next.csv", nxt, "text/csv")})
+    body = r.json()
+    assert body["verdict"] == "ASSERT"
+    assert body["root_cause"] == {"dimension": "category", "segment": "paid"}
 
 
 # --------------------------------------------------- SSE streaming + fallback

@@ -25,6 +25,14 @@ decides no verdict. It does exactly four things:
     exactly, with no ambiguity, from the CSV's own columns; see
     api/app.py:_investigate_pair). Never invents a metric name outside
     the ones supplied.
+  - map_schema()      : MAP an unfamiliar RAW source's columns onto the
+    long-panel contract [metric, dims..., n, c] — dimensions, metric name,
+    n/c counts. The ONE exception to "the verdict never depends on Qwen":
+    interpreting ambiguous column names has no single deducible answer, so
+    mock and real mode can genuinely disagree here. The only place with a
+    2nd, self-verification pass in real mode (Qwen re-checks its own first
+    answer before it's acted on) — see its docstring for why. Never invents
+    a column name outside the ones supplied, at either pass.
 
 Mock mode: if DASHSCOPE_API_KEY is absent or QWEN_MOCK=1, no network call is
 made and deterministic outputs are returned — the pipeline runs offline.
@@ -353,6 +361,103 @@ class QwenClient:
             self.last_mode, self.last_error = "fallback", str(exc)
             return template_suggest_setup(metrics)
 
+    # --- use 7: map an unfamiliar RAW source's columns onto the long-panel
+    # contract [metric, dims..., n, c] — the one place Qwen decides the
+    # SHAPE of the data feeding the calculation, not just its order, its
+    # wording, or a choice among already-known values. Unlike every other
+    # use above, this means the final result CAN differ between mock and
+    # real mode: interpreting ambiguous column names has no single
+    # mechanically-deducible answer (that's the whole reason Qwen is asked
+    # at all). The trade for that honesty: Qwen's decision is used directly,
+    # not gated behind a human confirmation — but it self-verifies in a 2nd
+    # pass before acting, catching its own misreads the same way a careful
+    # analyst re-checks their own work. Never invents a column name outside
+    # the ones supplied, at either pass. ---
+    def map_schema(self, columns: list[str], sample_rows: list[dict]) -> dict:
+        """Returns {"dim_columns": [...], "metric_column": <name or None>,
+        "n_column": <name or None>, "c_column": <name or None>,
+        "self_verified": bool, "reason": <text>}. In mock mode, a single
+        deterministic pass (self_verified=True — the template has no doubt
+        to re-examine). In real mode, a proposal pass followed by a
+        self-verification pass that may correct it."""
+        if self.mock:
+            self.last_mode, self.last_error = "mock", None
+            return template_map_schema(columns, sample_rows)
+
+        propose_system = (
+            "You are given the column names and a few sample rows of a raw "
+            "dataset that must be reshaped into a long panel "
+            "[metric, dimensions..., n, c]. Identify: the ONE column holding "
+            "the metric name (categorical, e.g. 'conversion'/'revenue'), the "
+            "ONE column that is the population/denominator count (n), the "
+            "ONE column that is the success/numerator or total count (c), "
+            "and which of the REMAINING columns are dimensions (categorical "
+            "breakdown columns, e.g. platform/category/country). Return ONLY "
+            "a JSON object: {\"dim_columns\": [...], \"metric_column\": "
+            "<name or null>, \"n_column\": <name or null>, \"c_column\": "
+            "<name or null>, \"reason\": <one short sentence>}. Do not "
+            "invent a column name outside the supplied list."
+        )
+        user = json.dumps({"columns": columns, "sample_rows": sample_rows[:5]},
+                          ensure_ascii=False)
+        try:
+            proposed = self._guarded_schema_mapping(
+                self._robust_parse_json(self.complete(
+                    propose_system, user, max_tokens=200,
+                    response_format={"type": "json_object"}), {}),
+                columns)
+
+            verify_system = (
+                "You just proposed this column mapping for a raw dataset. "
+                "Re-examine it against the sample rows: does each column "
+                "really hold what you assigned it (metric name / population "
+                "count n / success-or-total count c / dimension)? If "
+                "something looks wrong, correct it. Return ONLY a JSON "
+                "object with the FINAL mapping (corrected or unchanged): "
+                "{\"dim_columns\": [...], \"metric_column\": <name or null>, "
+                "\"n_column\": <name or null>, \"c_column\": <name or null>, "
+                "\"self_verified\": <true if you kept your first answer, "
+                "false if you corrected it>, \"reason\": <one short "
+                "sentence>}. Do not invent a column name outside the "
+                "supplied list."
+            )
+            verify_user = json.dumps({"columns": columns, "sample_rows": sample_rows[:5],
+                                      "proposed_mapping": proposed}, ensure_ascii=False)
+            final = self._guarded_schema_mapping(
+                self._robust_parse_json(self.complete(
+                    verify_system, verify_user, max_tokens=200,
+                    response_format={"type": "json_object"}), {}),
+                columns)
+            final["self_verified"] = bool(final.get("self_verified", True))
+            self.last_mode, self.last_error = "real", None
+            return final
+        except Exception as exc:
+            self.last_mode, self.last_error = "fallback", str(exc)
+            return template_map_schema(columns, sample_rows)
+
+    @staticmethod
+    def _guarded_schema_mapping(raw: dict, columns: list[str]) -> dict:
+        """Anti-invention guard shared by both map_schema() passes: every
+        returned column name must be one actually supplied, else dropped —
+        same discipline as _guard_filter()/suggest_setup()."""
+        if not isinstance(raw, dict):
+            raise ValueError("map_schema did not return an object")
+        cols = set(columns)
+        metric_col = raw.get("metric_column")
+        n_col = raw.get("n_column")
+        c_col = raw.get("c_column")
+        metric_col = metric_col if metric_col in cols else None
+        n_col = n_col if n_col in cols else None
+        c_col = c_col if c_col in cols else None
+        dim_cols = [c for c in raw.get("dim_columns", [])
+                   if c in cols and c not in (metric_col, n_col, c_col)]
+        out = {"dim_columns": dim_cols, "metric_column": metric_col,
+              "n_column": n_col, "c_column": c_col,
+              "reason": raw.get("reason", "")}
+        if "self_verified" in raw:
+            out["self_verified"] = raw["self_verified"]
+        return out
+
 
 def template_report(p: dict) -> str:
     """Deterministic wording (mock mode / fallback). Same facts, no LLM."""
@@ -426,6 +531,44 @@ def template_suggest_setup(metrics: list[str]) -> dict:
                  "value", "refund", "payout", "gmv")
     sum_metrics = [m for m in metrics if any(h in m.lower() for h in _SUM_HINTS)]
     return {"sum_metrics": sum_metrics,
+           "reason": "keyword heuristic (mock/fallback, no LLM call)"}
+
+
+def template_map_schema(columns: list[str], sample_rows: list[dict]) -> dict:
+    """Deterministic heuristic column matching (mock mode / fallback), one
+    pass, self_verified=True — no LLM call, so there is nothing for a
+    template to doubt about its own answer."""
+    # Multi-character substrings only: a bare "n" or "c" hint would match as
+    # a substring of almost any word ("category" contains "c") — those are
+    # handled separately below as an exact (case-insensitive) name match.
+    _METRIC_HINTS = ("metric", "event", "kpi")
+    _N_HINTS = ("total", "count", "population", "impressions", "sent", "attempts")
+    _C_HINTS = ("success", "conversion", "converted", "purchase", "click")
+
+    def _first_match(hints, taken):
+        for col in columns:
+            if col in taken:
+                continue
+            if col.lower() in ("n", "c"):     # exact bare name, not a substring guess
+                continue
+            if any(h in col.lower() for h in hints):
+                return col
+        return None
+
+    def _first_exact(name: str, taken):
+        for col in columns:
+            if col not in taken and col.lower() == name:
+                return col
+        return None
+
+    metric_col = _first_match(_METRIC_HINTS, set())
+    n_col = (_first_exact("n", {metric_col})
+            or _first_match(_N_HINTS, {metric_col}))
+    c_col = (_first_exact("c", {metric_col, n_col})
+            or _first_match(_C_HINTS, {metric_col, n_col}))
+    dim_cols = [c for c in columns if c not in (metric_col, n_col, c_col)]
+    return {"dim_columns": dim_cols, "metric_column": metric_col,
+           "n_column": n_col, "c_column": c_col, "self_verified": True,
            "reason": "keyword heuristic (mock/fallback, no LLM call)"}
 
 
