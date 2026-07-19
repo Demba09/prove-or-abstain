@@ -311,7 +311,13 @@ def cross_model_eval(models=("qwen-turbo", "qwen-plus", "qwen-max")) -> dict:
 
 
 if __name__ == "__main__":
-    os.environ.setdefault("QWEN_MOCK", "1")
+    # Keep the main 30-scenario table cheap/fast/mock by default (that's
+    # the point of QWEN_MOCK=1 reproducibility) -- but only when no key was
+    # given. Forcing it unconditionally would make _has_key() always False
+    # below, so compare_llm_raw()/cross_model_eval() could never run even
+    # with a real DASHSCOPE_API_KEY on the command line.
+    if not os.environ.get("DASHSCOPE_API_KEY"):
+        os.environ.setdefault("QWEN_MOCK", "1")
     os.environ.setdefault("PROBATIO_DB", ":memory:")
     graph_m = run_benchmark("graph")
     agent_m = run_benchmark("agent")
