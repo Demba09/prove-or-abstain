@@ -81,10 +81,15 @@ Cloud Function Compute as-is.
   mode. We're upfront in the README about what that number does and doesn't
   prove: it's a strong regression test against cases built clearly on one
   side of each gate's threshold, not evidence on genuinely ambiguous data —
-  which is why two *real* public datasets (historical airline passenger
-  counts, the Titanic manifest) also go through the pipeline, reshaped but
-  not invented, kept deliberately separate from the official benchmark
-  number to avoid smuggling circularity back in.
+  which is why three *real* public datasets (historical airline passenger
+  counts, the Titanic manifest, US college-major employment stats) also go
+  through the pipeline, reshaped but not invented, kept deliberately
+  separate from the official benchmark number to avoid smuggling
+  circularity back in. The college-majors one also has a genuinely raw,
+  unrenamed-columns variant sent through "Watch a source" — the deterministic
+  mock heuristic can't map it (proven by a test asserting it 400s), which is
+  finally a fair, non-softball test of `map_schema()`'s judgment rather than
+  the math.
 - **Calibration, not just accuracy.** `calibrate.py` buckets ASSERT
   confidence and reports Expected Calibration Error — does a 0.7 confidence
   actually mean "right ~70% of the time"? (ECE ≈ 0.19, conservative:
@@ -154,10 +159,12 @@ Cloud Function Compute as-is.
   within mobile and narrows the cause to `segment=paid` — or states
   explicitly that the whole segment is affected.
 - **100% on a 30-scenario benchmark, 0% false-ASSERT and false-ABSTAIN**,
-  plus two real external datasets that agree with well-documented history
-  (the 1960 air-travel growth spike was systemic, not seasonal; Titanic
-  survival localizes to sex, not the popular class explanation) — and we say
-  plainly, in the README, what the synthetic 100% does and doesn't prove.
+  plus three real external datasets that agree with well-documented history
+  or reveal a genuine, un-planted pattern (the 1960 air-travel growth spike
+  was systemic, not seasonal; Titanic survival localizes to sex, not the
+  popular class explanation; the STEM employment gap concentrates in
+  majority-women majors) — and we say plainly, in the README, what the
+  synthetic 100% does and doesn't prove.
 - A **continuous autopilot** that persists its own baseline, survives a
   restart, and never lets one broken data source corrupt another's history.
 - A **fully offline, reproducible pipeline** (`QWEN_MOCK=1`) with a

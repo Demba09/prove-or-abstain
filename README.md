@@ -281,9 +281,9 @@ DASHSCOPE_API_KEY=sk-... python -m prove_or_abstain.benchmark
 ## Tested against real data, not just planted scenarios
 
 Every scenario above is synthetic by necessity — ground truth has to be
-known in advance to grade accuracy. As an external sanity check, two public,
-real (not invented) datasets go through the same pipeline, committed in
-`examples/` and pinned by tests so CI catches any drift:
+known in advance to grade accuracy. As an external sanity check, three
+public, real (not invented) datasets go through the same pipeline,
+committed in `examples/` and pinned by tests so CI catches any drift:
 
 - **`examples/real_flights_series.csv`** — [seaborn-data's `flights.csv`](https://github.com/mwaskom/seaborn-data),
   real monthly airline passenger counts, 1949–1960. 1960 grew **+11.2%**
@@ -307,25 +307,62 @@ real (not invented) datasets go through the same pipeline, committed in
   curl -X POST localhost:8000/investigate/upload \
     -F baseline=@examples/real_titanic_southampton.csv -F current=@examples/real_titanic_cherbourg.csv
   ```
+- **`examples/real_majors_nonstem.csv` / `_stem.csv`** — [fivethirtyeight's
+  `college-majors`](https://github.com/fivethirtyeight/data/tree/master/college-majors)
+  `recent-grads.csv`, 173 real US majors with real employment counts. STEM
+  majors (the dataset's own classification, not one we picked) employ at
+  75.0% vs. 81.0% for everything else — and that gap is **not** uniform: it
+  concentrates in majority-women majors (81.5% → 68.8%) far more than
+  majority-men ones (79.9% → 79.2%), a real, un-planted finding with
+  genuinely low confidence, correctly staying a `RECOMMEND`.
+  ```bash
+  curl -X POST localhost:8000/investigate/upload \
+    -F baseline=@examples/real_majors_nonstem.csv -F current=@examples/real_majors_stem.csv
+  ```
+  The same data also exists as `_raw.csv`, with plausible, unrenamed column
+  names (`Field`, `Group`, `Total`, `Employed`) instead of `metric`/`n`/`c` —
+  sent through `POST /sources/{id}/observe` ("Watch a source", below) so it
+  has to go through `map_schema()` for real. See point 2 just below for what
+  that actually proves.
 
-Two honest limits on what these two prove:
+Two honest limits on what these three prove:
 
 1. **Deliberately not folded into the 100% above.** The 30 synthetic
    scenarios have ground truth written *before* any run, derived from how
-   the panel was built. For these two, the "expected" outcome was
+   the panel was built. For these three, the "expected" outcome was
    determined by running the pipeline and documenting what came out — not
    an independently-established truth checked beforehand. Counting them
    into `run_benchmark()`'s accuracy would reintroduce exactly the
-   circularity the benchmark otherwise avoids, so they stay two separate
-   tests, never part of the 30/30.
-2. **They don't test Qwen's reliability.** Both CSVs sent to the API are
-   already in the clean long-panel shape (`metric`, `n`, `c`) — reshaped by
-   hand before upload. `map_schema()` (the one place Qwen's decision can
-   change a verdict) never runs on either. These validate the deterministic
-   math against real-world noise, not Qwen's judgment on genuinely
-   ambiguous raw columns — that would need a real source with truly unusual
-   column names (not renamed by us) and a live DashScope key, neither of
-   which is available in every environment this runs in.
+   circularity the benchmark otherwise avoids, so they stay separate tests,
+   never part of the 30/30.
+2. **Two of the three don't test Qwen's reliability at all** — flights and
+   Titanic are sent already in the clean long-panel shape (`metric`, `n`,
+   `c`), so `map_schema()` never runs. The college-majors `_raw.csv` variant
+   closes that gap partway: real, unrenamed columns (`Employed` isn't in
+   `template_map_schema()`'s keyword list, so the deterministic mock
+   heuristic genuinely can't solve it — confirmed by
+   `test_real_college_majors_raw_columns_need_qwens_schema_mapping`,
+   which asserts the mock path 400s) finally makes this a fair test of
+   judgment, not math. What we verified here is that the downstream verdict
+   is correct on this exact real data once mapped correctly — proving the
+   math side, not Qwen's live answer. Confirming Qwen itself resolves it
+   needs a real `DASHSCOPE_API_KEY`, not available in every environment
+   this runs in:
+   ```bash
+   DASHSCOPE_API_KEY=sk-... python -c "
+   from prove_or_abstain.llm import get_client
+   print(get_client().map_schema(
+       ['Field', 'Group', 'Total', 'Employed'],
+       [{'Field': 'Employment', 'Group': 'majority_men', 'Total': 1660894, 'Employed': 1327119}]))"
+   # then, with the API running and DASHSCOPE_API_KEY exported:
+   curl -X POST localhost:8000/sources/majors/observe -F panel=@examples/real_majors_nonstem_raw.csv
+   curl -X POST localhost:8000/sources/majors/observe -F panel=@examples/real_majors_stem_raw.csv
+   ```
+   Expect `map_schema()` to return `n_column: Total`, `c_column: Employed`,
+   `metric_column: Field`, and the second `/observe` call to come back
+   `ASSERT` / `Group: majority_women` — the same finding as the pre-renamed
+   CSVs above (the dimension keeps its original raw name; only `metric`/
+   `n`/`c` get relabeled).
 
 ## Calibration
 
