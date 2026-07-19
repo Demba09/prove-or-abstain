@@ -127,6 +127,47 @@ divergent model can never cause a false ABSTAIN. Qwen drives the *path*; the
 math decides the *verdict*. Offline (`QWEN_MOCK=1` or no key), the loop is
 replayed deterministically and reproduces the graph exactly.
 
+### Where Qwen actually earns its keep
+
+Ordering 2 dimensions or rephrasing an already-computed verdict is low-stakes
+busywork a template does just as well — the guarantee above. Four places
+narrow that gap to where an LLM beats a fixed rule outright:
+
+- **`suggest_setup()`** (`POST /investigate/suggest`) — classifying an
+  unfamiliar metric NAME as rate or sum is a real text-understanding call;
+  dimensions need no such help (exactly inferred from the CSV's own columns).
+- **Wider dimension spaces** — ordering only matters past 2 candidates.
+  `examples/plan_baseline.csv`/`plan_current.csv` add a 3rd dimension
+  (`plan`) that neither `segment` nor `device` alone localizes — testing it
+  first instead of last finds the cause in 1 iteration instead of 3. Same
+  verdict either order; real difference in cost and latency.
+- **Conversational follow-up** — `POST /investigate/query` accepts
+  `previous_panel` plus a follow-up like *"and on mobile only?"*: Qwen may
+  select a `(dim, segment)` filter from values it's given (never invents
+  one) and the pipeline re-runs, filtered.
+- **Evidence-grounded speculation** (`prove_or_abstain/evidence.py`) — on
+  ASSERT, `speculate_causes()` is handed any operational events already
+  logged for the winning segment and grounds a hypothesis in the most
+  relevant one, still labelled speculation. A small embedded table standing
+  in for a real calendar/deploy-log integration.
+
+**One deliberate exception: `map_schema()`.** Everything above is provably
+LLM-independent (`QWEN_MOCK=1` proves it — same verdict, same accuracy).
+`map_schema()` (used by `POST /sources/{id}/observe` on a raw source whose
+columns don't already match `[metric, dims..., n, c]`) is different on
+purpose: it decides which column *is* `n`, which is `c`, which are
+dimensions — the shape of the data feeding the calculation, not its order or
+wording. Interpreting ambiguous column names has no single deducible answer,
+so mock and real mode can genuinely disagree here. Rather than hide that
+behind a human-confirmation gate (which would make the decision decorative
+again), it's used directly: real mode runs it in **two passes** — a
+proposal, then a self-verification pass where Qwen re-examines its own
+answer and may correct it (`self_verified: false` when it does). Either way,
+the result still passes through the same `_validate_panel`/
+`_validate_rate_counts` every data source goes through, rejecting an
+incoherent mapping before it reaches `gates.py` — a deterministic backstop,
+not a human one.
+
 ## Verification gates
 
 `ASSERT` requires all four gates to pass. A failed gate produces an `ABSTAIN` with the
@@ -192,6 +233,36 @@ DASHSCOPE_API_KEY=sk-... python -m prove_or_abstain.benchmark
 
 > _Live hallucination-rate numbers are populated from a real run; run the command
 > above with a key to reproduce them in your own environment._
+
+## Tested against real data, not just planted scenarios
+
+Every scenario above is synthetic by necessity — ground truth has to be
+known in advance to grade accuracy. As an external sanity check, two public,
+real (not invented) datasets go through the same pipeline, committed in
+`examples/` and pinned by tests so CI catches any drift:
+
+- **`examples/real_flights_series.csv`** — [seaborn-data's `flights.csv`](https://github.com/mwaskom/seaborn-data),
+  real monthly airline passenger counts, 1949–1960. 1960 grew **+11.2%**
+  over 1959 (a real trend — the postwar air travel boom), and the pipeline
+  correctly **ABSTAINs**: growth concentration by month is 0.13, nowhere
+  near the 0.55 threshold — genuinely systemic, not seasonal, and nothing
+  was planted to make that true.
+  ```bash
+  curl -X POST localhost:8000/investigate/series -F series=@examples/real_flights_series.csv -F window=1 -F sum_metrics=passengers
+  ```
+- **`examples/real_titanic_southampton.csv` / `_cherbourg.csv`** — [seaborn-data's `titanic.csv`](https://github.com/mwaskom/seaborn-data),
+  the real passenger manifest, split by embarkation port (Southampton
+  n=644, Cherbourg n=168 — real, unequal, non-round group sizes). Overall
+  survival jumps 34% → 55%; the popular explanation is "Cherbourg had more
+  1st class passengers", but decomposed honestly, `pclass` alone does
+  **not** clear the significance gate (p=0.10) while `sex` does (p=0.0018) —
+  the well-documented "women and children first" effect dominates.
+  Confidence comes out genuinely low (0.09) on real, noisy, small-sample
+  data, correctly staying a `RECOMMEND`, never an auto-`EXECUTE`.
+  ```bash
+  curl -X POST localhost:8000/investigate/upload \
+    -F baseline=@examples/real_titanic_southampton.csv -F current=@examples/real_titanic_cherbourg.csv
+  ```
 
 ## Calibration
 
@@ -261,7 +332,7 @@ api/                deployment entry point — FastAPI app + static demo page (S
 mcp_server.py       MCP entry point for Qwen Cloud agents
 scripts/            validation & demo tooling (see below)
 tests/              pytest suite (88 tests, runs offline with QWEN_MOCK=1)
-examples/           sample CSVs for the upload / watch-a-source endpoints
+examples/           sample CSVs — synthetic (planted ground truth) + 2 real public datasets
 docs/               architecture diagram, demo script, devpost text
 ```
 
@@ -328,89 +399,28 @@ POST /executions/{id}/resolve  human resolves an active alert
 GET  /health               healthcheck
 ```
 
-### Two ways to compare: a snapshot, or a watched source
-
-Every `/investigate*` endpoint above is **"Compare two snapshots"**: you
-supply both a baseline and a current dataset yourself, for a one-off
-comparison ("last month vs this month") — no history required. That's the
-right tool for the flagship scenario at the top of this README: a PM asking
-"what happened?" on data that was never ingested before.
-
-**`POST /sources/{source_id}/observe` is a different capability: "Watch a
-source".** You send ONE observation, tagged with an id you choose. No
-baseline file:
-
-- **1st call for a `source_id`** — nothing to compare against yet, so it
-  only seeds: `{"cold_start": true, "verdict": "BASELINE_SET"}`.
-- **Every call after that** — compared automatically against a pooled
-  window of every prior observation persisted for that `source_id`
-  (`prove_or_abstain/memory.py`'s `observations` table + `reference.py`'s
-  pooling, the same summed-counts algebra as `panels.py::split_series`, kept
-  z-test-valid). The baseline lives in the database and grows with each
-  call — nothing to re-supply.
-
-`monitor.py`'s continuous surveillance loop is built on this same mechanism
-(`prove_or_abstain/ingest.py::ingest_and_investigate`), so a restarted
-process picks its history back up instead of losing it.
-
-If the columns you send don't already match the long-panel contract
-(`[metric, dims..., n, c]`), `map_schema()` (below) reshapes them first.
-
-### Where Qwen's contribution stops being decorative
-
-Ordering 2 dimensions or rephrasing an already-computed verdict is low-stakes
-busywork a template does just as well (`QWEN_MOCK=1` proves it — same
-verdicts, same accuracy). Four places narrow that gap to where an LLM
-actually beats a fixed rule:
-
-- **`suggest_setup()`** (`POST /investigate/suggest`) — classifying an
-  unfamiliar metric NAME as rate or sum is a real text-understanding call;
-  unlike dimensions (exactly inferred from the CSV's own columns, no
-  ambiguity), a rule-based keyword list is the fallback, not the answer.
-- **Wider dimension spaces** — `plan_dimensions()`'s ordering only matters
-  when there's more than 2 candidates to order. `examples/plan_baseline.csv`
-  / `plan_current.csv` add a 3rd dimension (`plan`) where neither `segment`
-  nor `device` localizes (concentration 0.25 and 0.50, both < 0.55) and only
-  `plan` does (1.0) — testing it first instead of last finds the cause in 1
-  iteration instead of 3. Same verdict either order; real difference in cost
-  and latency (see `test_dimension_order_changes_speed_not_verdict`).
-- **Conversational follow-up** — `POST /investigate/query` accepts
-  `previous_panel` plus a follow-up like *"and on mobile only?"*: Qwen may
-  select a `(dim, segment)` filter from the panel's known values (guarded by
-  `_guard_filter`, same anti-invention rule as the panel/metric selection)
-  and the pipeline re-runs, filtered, unchanged otherwise.
-- **Evidence-grounded speculation** (`prove_or_abstain/evidence.py`) — on
-  ASSERT, `speculate_causes()` is handed any operational events already
-  logged for the winning segment (a campaign change, a deploy...) and grounds
-  a hypothesis in the most relevant one instead of guessing blindly. Still
-  labelled speculation for a human to confirm — this is a small embedded
-  table standing in for a real calendar/deploy-log integration (see
-  "What's next").
-
-**One deliberate exception to "same verdict, mock or real": `map_schema()`.**
-Everything above is provably LLM-independent — `QWEN_MOCK=1` reproduces the
-identical verdict, because the math tests every option, or Qwen only picks
-among values already known to be valid. `map_schema()` (used by
-`POST /sources/{id}/observe` when a raw source's columns don't already match
-`[metric, dims..., n, c]`) is different on purpose: it decides which column
-*is* `n`, which is `c`, which are dimensions — the shape of the data feeding
-the calculation, not its order or its wording. Interpreting ambiguous
-column names has no single mechanically-deducible answer, so the result can
-genuinely differ between mock and real mode here. Rather than hide that
-behind a human-confirmation step (which would make Qwen's contribution
-decorative again), its decision is used directly: real mode runs it in
-**two passes**, a proposal and then a
-self-verification pass where Qwen re-examines its own answer against the
-sample rows and may correct it (`self_verified: false` when it does — see
-`test_map_schema_self_verification_corrects_first_pass`). Whatever mapping
-comes out, mock or real, still passes through the same `_validate_panel`/
-`_validate_rate_counts` every other data source goes through, so an
-incoherent mapping is rejected before it reaches `gates.py` — a
-deterministic backstop, not a human one.
+Two distinct ways to feed it data: **compare two snapshots** yourself
+(`/investigate*` above — a one-off "last month vs this month"), or **watch a
+source** over time (`/sources/{id}/observe` — send one observation at a
+time, no baseline file). See "Autonomous monitoring" below for the second
+one, and "Where Qwen actually earns its keep" above for `map_schema()`,
+which reshapes non-conformant columns before either path runs.
 
 ## Autonomous monitoring, persistence & audit
 
-The Track-4 autopilot is a continuous loop, not just an endpoint:
+The Track-4 autopilot is a continuous loop, not just an endpoint. It's built
+on **"Watch a source"** (`POST /sources/{source_id}/observe`): send ONE
+observation, tagged with an id you choose — no baseline file. The 1st call
+for a `source_id` only seeds (`{"cold_start": true, "verdict":
+"BASELINE_SET"}`); every call after that is compared automatically to a
+pooled window of everything already persisted for that id (`memory.py`'s
+`observations` table + `reference.py`'s pooling — the same summed-counts
+algebra as `panels.py::split_series`, kept z-test-valid). The baseline lives
+in the database and grows with each call, so a restarted process picks its
+history back up instead of losing it — unlike the explicit
+`/investigate/upload`-style endpoints, which stay the right tool for a
+one-off comparison with no ingestion history (the flagship PM scenario at
+the top of this README).
 
 - **`monitor.py`** — `MetricMonitor` watches a set of sources (SQL / Sheets /
   CSV / inline). Every cycle it hands the fetched panel to
@@ -556,7 +566,7 @@ With MCP, a Qwen agent:
 | **Continuous autonomy** | `monitor.py` watches sources, investigates on movement, persists + alerts |
 | **Human-in-the-loop checkpoints** | ABSTAIN always escalates; autopilot requires confidence ≥ 0.70 to execute; alerts resolvable |
 | **Provable, not just a demo** | 30-scenario benchmark (100%, 0% false-ASSERT), ECE calibration, reproducible audit trails, per-request cost |
-| **Production-ready** | Docker, CI, 64 tests, SQLite persistence, SSE streaming, API docs at `/docs` (ReDoc) |
+| **Production-ready** | Docker, CI, 90 tests, SQLite persistence, SSE streaming, API docs at `/docs` (ReDoc) |
 
 **Qwen Cloud integration:** `prove_or_abstain/llm.py` calls Qwen via DashScope for dimension ordering,
 report phrasing, and query routing only. The math (pandas, numpy) and statistics

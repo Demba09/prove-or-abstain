@@ -981,9 +981,12 @@ def test_schema_mapping_rejects_incoherent_mapping_before_the_math():
 
 def test_schema_mapping_end_to_end_via_examples(tmp_path):
     """examples/schema_mapping_seed.csv + _next.csv: non-standard column
-    names (category/platform/total_users/total_conversions), mapped via
-    map_schema() (mock mode) onto the long-panel contract, localizing to
-    the same paid-segment collapse as panels.CLEAN."""
+    names (category/platform/total_users/total_conversions), non-round
+    sample sizes (jittered, not a flat 5000/3000/1500/500), mapped via
+    map_schema() (mock mode) onto the long-panel contract, localizing to a
+    referral-segment collapse — deliberately a different segment and a
+    different drop magnitude than panels.CLEAN, so this isn't just the same
+    scenario relabeled."""
     from prove_or_abstain import memory
     from pathlib import Path
     root = Path(__file__).resolve().parent.parent / "examples"
@@ -994,7 +997,58 @@ def test_schema_mapping_end_to_end_via_examples(tmp_path):
     r = client.post("/sources/rawschema/observe", files={"panel": ("next.csv", nxt, "text/csv")})
     body = r.json()
     assert body["verdict"] == "ASSERT"
-    assert body["root_cause"] == {"dimension": "category", "segment": "paid"}
+    assert body["root_cause"] == {"dimension": "category", "segment": "referral"}
+
+
+# ----------------------------------------------- real, external data (not synthetic)
+# Every other example in examples/ is hand-constructed with a known, planted
+# cause — necessary to prove the math against a ground truth, but every
+# scenario ends up suspiciously round (n in the thousands, a 7%->5% drop
+# reused verbatim in more than one place). These two are real public
+# datasets (seaborn-data's flights.csv and titanic.csv, MIT-licensed),
+# reshaped into the long-panel contract but with none of the numbers
+# invented: real group sizes (7 to 353), real noise, no planted answer.
+
+def test_real_flights_1960_growth_is_systemic_not_seasonal():
+    """seaborn-data/flights.csv: real monthly airline passenger counts,
+    1949-1960. 1960 grew +11.2% over 1959 (a real trend — postwar air
+    travel boom) but the growth is NOT concentrated in any one month
+    (concentration well under 0.55) — a genuine ABSTAIN, not a planted one."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent / "examples"
+    r = client.post("/investigate/series",
+                    files={"series": ("flights.csv",
+                          (root / "real_flights_series.csv").read_bytes(), "text/csv")},
+                    data={"window": "1", "sum_metrics": "passengers"})
+    body = r.json()
+    assert body["verdict"] == "ABSTAIN"
+    assert body["gates"]["month"]["concentration"] < 0.3
+
+
+def test_real_titanic_survival_gap_localizes_to_sex_not_class():
+    """seaborn-data/titanic.csv: real passenger manifest. Comparing
+    Southampton (n=644) against Cherbourg (n=168) passengers, overall
+    survival jumps from 34% to 55%. Historically this is usually attributed
+    to Cherbourg carrying more 1st-class passengers — but decomposed
+    honestly, 'pclass' alone does NOT clear the significance gate (p=0.10,
+    small samples once split further), while 'sex' does (p=0.0018): the
+    well-documented 'women and children first' effect dominates. Confidence
+    is genuinely low (real data, not a clean planted scenario) — an honest
+    RECOMMEND, not a confident EXECUTE."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent / "examples"
+    r = client.post("/investigate/upload", files={
+        "baseline": ("southampton.csv",
+                    (root / "real_titanic_southampton.csv").read_bytes(), "text/csv"),
+        "current": ("cherbourg.csv",
+                   (root / "real_titanic_cherbourg.csv").read_bytes(), "text/csv"),
+    })
+    body = r.json()
+    assert body["verdict"] == "ASSERT"
+    assert body["root_cause"] == {"dimension": "sex", "segment": "female"}
+    assert body["gates"]["pclass"]["verdict"] == "ABSTAIN"     # the popular guess doesn't hold up
+    assert body["confidence"] < 0.3                            # real data: honestly uncertain
+    assert body["action"]["kind"] == "RECOMMEND"               # too low-confidence to auto-execute
 
 
 # --------------------------------------------------- SSE streaming + fallback

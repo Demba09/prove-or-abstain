@@ -1,0 +1,7 @@
+metric,pclass,sex,n,c
+survived,class1,female,43,42
+survived,class1,male,42,17
+survived,class2,female,7,7
+survived,class2,male,10,2
+survived,class3,female,23,15
+survived,class3,male,43,10
