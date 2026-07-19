@@ -340,6 +340,150 @@ def test_query_never_picks_outside_panels():
     assert body["panel"] in {"clean", "diffuse", "mixshift", "deep"}
 
 
+# ------------------------------------------------------- conversational follow-up
+def test_query_followup_filters_to_named_segment():
+    unfiltered = client.post("/investigate", json={"panel": "clean"}).json()
+    filtered = client.post("/investigate/query", json={
+        "query": "and what about just mobile",
+        "previous_panel": "clean",
+    }).json()
+    assert filtered["panel"] == "clean"
+    assert filtered["routing"]["filter"] == {"dim": "device", "segment": "mobile"}
+    # the pipeline actually ran on half the population once filtered
+    assert (filtered["gates"]["segment"]["leading_sample_n"]
+            < unfiltered["gates"]["segment"]["leading_sample_n"])
+
+
+def test_query_followup_keeps_previous_panel_without_filter():
+    body = client.post("/investigate/query", json={
+        "query": "and what about that",
+        "previous_panel": "diffuse",
+    }).json()
+    assert body["panel"] == "diffuse"
+    assert body["routing"]["filter"] is None
+
+
+def test_guard_filter_rejects_values_outside_the_supplied_dims():
+    # This is the safety net for the REAL LLM path (route_query's non-mock
+    # branch): a filter is only accepted if both the dim and the segment
+    # value were in what the caller supplied, never a hallucinated pair.
+    from prove_or_abstain.llm import _guard_filter
+    dims = {"segment": ["organic", "paid"], "device": ["mobile", "desktop"]}
+    assert _guard_filter({"dim": "segment", "segment": "paid"}, dims) == \
+        {"dim": "segment", "segment": "paid"}
+    assert _guard_filter({"dim": "segment", "segment": "moon"}, dims) is None
+    assert _guard_filter({"dim": "country", "segment": "france"}, dims) is None
+    assert _guard_filter(None, dims) is None
+    assert _guard_filter({"dim": "segment", "segment": "paid"}, None) is None
+
+
+# ------------------------------------------------------------- setup suggestion
+def test_suggest_setup_flags_revenue_as_sum():
+    from prove_or_abstain.llm import template_suggest_setup
+    out = template_suggest_setup(["conversion", "revenue", "activation"])
+    assert out["sum_metrics"] == ["revenue"]
+
+
+def test_suggest_setup_never_invents_a_metric_name():
+    from prove_or_abstain.llm import get_client
+    out = get_client().suggest_setup(["conversion", "revenue"])
+    assert set(out["sum_metrics"]) <= {"conversion", "revenue"}
+
+
+def test_investigate_suggest_endpoint():
+    from prove_or_abstain.panels import BASELINE
+    r = client.post("/investigate/suggest",
+                    files={"baseline": ("baseline.csv", _csv(BASELINE), "text/csv")})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert set(body["dims"]) == {"segment", "device"}
+    assert body["metrics"] == ["activation", "conversion"]
+    assert body["sum_metrics"] == []          # neither metric name hints at a sum
+
+
+def test_investigate_suggest_flags_revenue_column():
+    from prove_or_abstain.panels import BASELINE
+    revenue_panel = BASELINE.copy()
+    revenue_panel["metric"] = "revenue"
+    r = client.post("/investigate/suggest",
+                    files={"baseline": ("baseline.csv", _csv(revenue_panel), "text/csv")})
+    assert r.json()["sum_metrics"] == ["revenue"]
+
+
+# -------------------------------------------------- wide dimension space (3+ dims)
+def _plan_examples():
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent / "examples"
+    return (root / "plan_baseline.csv").read_bytes(), (root / "plan_current.csv").read_bytes()
+
+
+def test_upload_localizes_on_a_third_dimension():
+    """Neither 'segment' nor 'device' localizes this drop (concentration
+    0.25 and 0.50, both < 0.55) — only 'plan' does (concentration 1.0).
+    Proves the loop isn't hardcoded to 2 dimensions: it exhausts whatever
+    candidate list it's given, in CSV column order (segment, device, plan)."""
+    base_csv, curr_csv = _plan_examples()
+    r = client.post("/investigate/upload", files={
+        "baseline": ("baseline.csv", base_csv, "text/csv"),
+        "current": ("current.csv", curr_csv, "text/csv"),
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["verdict"] == "ASSERT"
+    assert body["root_cause"] == {"dimension": "plan", "segment": "free"}
+    assert body["gates"]["segment"]["verdict"] == "ABSTAIN"
+    assert body["gates"]["device"]["verdict"] == "ABSTAIN"
+
+
+def test_dimension_order_changes_speed_not_verdict():
+    """Same data, same verdict, but testing 'plan' first instead of last
+    finds it in 1 iteration instead of 3 — this is exactly what Qwen's
+    plan_dimensions() ordering buys in agent/graph mode: the math tests
+    every dimension either way, so the outcome can't change, but a good
+    order gets there faster (fewer investigator/verifier passes)."""
+    import io
+    from prove_or_abstain.graph import APP as GRAPH
+    base_csv, curr_csv = _plan_examples()
+    base = pd.read_csv(io.BytesIO(base_csv))
+    curr = pd.read_csv(io.BytesIO(curr_csv))
+
+    def run(dims):
+        state = {"baseline": base, "current": curr, "metrics": ["conversion"],
+                 "dims": dims, "autopilot_enabled": False, "trace": []}
+        return GRAPH.invoke(state)
+
+    worst = run(["segment", "device", "plan"])   # plan tried last
+    best = run(["plan", "segment", "device"])     # plan tried first
+
+    assert worst["verdict"] == best["verdict"] == "ASSERT"
+    assert worst["winning_dim"] == best["winning_dim"] == "plan"
+    assert best["iteration"] < worst["iteration"]
+    assert best["iteration"] == 1
+    assert worst["iteration"] == 3
+
+
+# --------------------------------------------------- evidence-grounded speculation
+def test_find_events_matches_exact_segment():
+    from prove_or_abstain.evidence import find_events
+    events = find_events("segment", "paid")
+    assert events and events[0]["event"] == "campaign_budget_cut"
+    assert find_events("segment", "organic") != events
+    assert find_events("segment", "unknown_segment") == []
+    assert find_events(None, "paid") == []
+
+
+def test_assert_speculation_grounds_in_logged_event():
+    # CLEAN localizes to segment=paid, which has a matching synthetic event.
+    body = client.post("/investigate", json={"panel": "clean"}).json()
+    assert body["root_cause"] == {"dimension": "segment", "segment": "paid"}
+    assert any("campaign_budget_cut" in s for s in body["speculations"])
+
+
+def test_abstain_speculation_has_no_events_to_ground_in():
+    body = client.post("/investigate", json={"panel": "diffuse"}).json()
+    assert body["speculations"] == []   # unchanged: ABSTAIN never speculates
+
+
 # --------------------------------------------------------------- SQL connector
 def _sqlite_dsn(tmp_path, tables: dict) -> str:
     from sqlalchemy import create_engine
@@ -626,10 +770,15 @@ def test_monitor_detects_and_records():
     from prove_or_abstain.monitor import MetricMonitor
     from prove_or_abstain.panels import BASELINE, CLEAN
     memory.reset()
-    mon = MetricMonitor(sources=[{
-        "type": "inline", "config": {"baseline": BASELINE, "current": CLEAN},
-        "metrics": ["conversion", "activation"], "dims": ["device", "segment"]}])
-    out = _run(mon.check_once())
+    source = {
+        "type": "inline", "config": {"current": BASELINE},
+        "metrics": ["conversion", "activation"], "dims": ["device", "segment"]}
+    mon = MetricMonitor(sources=[source])
+    first = _run(mon.check_once())               # cold start: nothing to compare yet
+    assert first[0]["verdict"] == "BASELINE_SET"
+
+    source["config"]["current"] = CLEAN
+    out = _run(mon.check_once())                 # compares against the persisted reference
     assert out[0]["verdict"] == "ASSERT" and out[0]["cause"] == "segment=paid"
     assert len(memory.get_history()) == 1
     assert len(memory.get_active_alerts()) == 1   # confident ASSERT -> alert
@@ -657,6 +806,249 @@ def test_monitor_survives_bad_source():
         "metrics": ["conversion"], "dims": ["device"]}])
     out = _run(mon.check_once())          # must not raise
     assert "error" in out[0]
+
+
+def test_monitor_broken_source_does_not_corrupt_the_healthy_ones_history():
+    """One source fails every cycle; the other must keep accumulating its
+    own persisted observation history unaffected (proves 'Watch a source'
+    persistence, not just an in-memory dict, survives partial failures)."""
+    from prove_or_abstain import memory
+    from prove_or_abstain.monitor import MetricMonitor
+    from prove_or_abstain.panels import BASELINE, CLEAN
+    memory.reset()
+    good = {"type": "inline", "config": {"current": BASELINE},
+            "metrics": ["conversion"], "dims": ["device", "segment"],
+            "source_id": "good"}
+    bad = {"type": "csv", "config": {"path": "/nonexistent/nope.csv"},
+          "metrics": ["conversion"], "dims": ["device"], "source_id": "bad"}
+    mon = MetricMonitor(sources=[good, bad])
+
+    first = _run(mon.check_once())
+    assert first[0]["verdict"] == "BASELINE_SET" and "error" in first[1]
+    assert memory.count_observations("good") == 1
+
+    good["config"]["current"] = CLEAN
+    second = _run(mon.check_once())
+    assert second[0]["verdict"] == "ASSERT" and "error" in second[1]
+    assert memory.count_observations("good") == 2   # unaffected by "bad"'s failures
+
+
+# --------------------------------------------------- watch a source (ingestion)
+
+def test_source_cold_start_seeds_without_a_verdict():
+    from prove_or_abstain import memory
+    from prove_or_abstain.panels import BASELINE
+    memory.reset()
+    r = client.post("/sources/coldtest/observe",
+                    files={"panel": ("baseline.csv", _csv(BASELINE), "text/csv")})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["cold_start"] is True
+    assert body["verdict"] == "BASELINE_SET"
+    assert memory.count_observations("coldtest") == 1
+
+
+def test_reference_window_pools_prior_observations_like_split_series():
+    """Pooling oracle: N observations of the same shape sum their raw counts
+    cell-by-cell, exactly like panels.py::split_series's window pooling —
+    the algebra this function deliberately duplicates (see reference.py)."""
+    from prove_or_abstain import memory, reference
+    memory.reset()
+    obs = pd.DataFrame([{"metric": "conversion", "segment": "paid", "n": 1000, "c": 70},
+                        {"metric": "conversion", "segment": "organic", "n": 2000, "c": 100}])
+    for _ in range(3):
+        memory.record_observation("pooltest", obs, ["segment"], ["conversion"])
+
+    pooled = reference.build_reference_window("pooltest", ["segment"])
+    pooled = pooled.set_index("segment")
+    assert pooled.loc["paid", "n"] == 3000 and pooled.loc["paid", "c"] == 210
+    assert pooled.loc["organic", "n"] == 6000 and pooled.loc["organic", "c"] == 300
+
+
+def test_reference_window_respects_window_size():
+    from prove_or_abstain import memory, reference
+    memory.reset()
+    for n in (1000, 2000, 3000):
+        obs = pd.DataFrame([{"metric": "conversion", "segment": "paid", "n": n, "c": n // 10}])
+        memory.record_observation("windowtest", obs, ["segment"], ["conversion"])
+
+    all_pooled = reference.build_reference_window("windowtest", ["segment"])
+    last_one = reference.build_reference_window("windowtest", ["segment"], window=1)
+    assert all_pooled["n"].iloc[0] == 6000          # 1000+2000+3000
+    assert last_one["n"].iloc[0] == 3000             # only the most recent
+
+
+def test_reference_window_raises_with_no_prior_observations():
+    from prove_or_abstain import memory, reference
+    memory.reset()
+    with pytest.raises(ValueError):
+        reference.build_reference_window("never-seen", ["segment"])
+
+
+def test_watch_a_source_end_to_end_localizes_paid():
+    from prove_or_abstain import memory
+    from prove_or_abstain.panels import BASELINE, CLEAN
+    memory.reset()
+    client.post("/sources/e2e/observe",
+               files={"panel": ("b.csv", _csv(BASELINE), "text/csv")})
+    r = client.post("/sources/e2e/observe",
+                    files={"panel": ("c.csv", _csv(CLEAN), "text/csv")})
+    body = r.json()
+    assert body["cold_start"] is False
+    assert body["verdict"] == "ASSERT"
+    assert body["root_cause"] == {"dimension": "segment", "segment": "paid"}
+
+
+def test_memory_reset_wipes_observations():
+    from prove_or_abstain import memory
+    memory.reset()
+    df = pd.DataFrame([{"metric": "conversion", "segment": "paid", "n": 100, "c": 10}])
+    memory.record_observation("wipeme", df, ["segment"], ["conversion"])
+    assert memory.count_observations("wipeme") == 1
+    memory.reset()
+    assert memory.count_observations("wipeme") == 0
+
+
+# --------------------------------------------------- schema mapping (Qwen)
+
+def test_map_schema_never_invents_a_column_name():
+    from prove_or_abstain.llm import QwenClient
+    cols = ["category", "platform", "total_users", "total_conversions"]
+    bad = {"metric_column": "nonexistent", "n_column": "total_users",
+          "c_column": "made_up", "dim_columns": ["category", "invented_dim"]}
+    out = QwenClient._guarded_schema_mapping(bad, cols)
+    assert out["metric_column"] is None
+    assert out["c_column"] is None
+    assert out["n_column"] == "total_users"
+    assert set(out["dim_columns"]) == {"category"}
+
+
+def test_map_schema_mock_identifies_standard_columns():
+    from prove_or_abstain.llm import template_map_schema
+    cols = ["metric", "category", "platform", "total_users", "total_conversions"]
+    out = template_map_schema(cols, [])
+    assert out["metric_column"] == "metric"
+    assert out["n_column"] == "total_users"
+    assert out["c_column"] == "total_conversions"
+    assert set(out["dim_columns"]) == {"category", "platform"}
+    assert out["self_verified"] is True
+
+
+def test_map_schema_self_verification_corrects_first_pass(monkeypatch):
+    """Real-mode map_schema is 2 passes: propose, then self-verify. This
+    simulates a first pass that swaps n/c by mistake, and a second pass
+    that catches and corrects it — proving map_schema() returns the
+    CORRECTED mapping, not the first guess."""
+    import json as _json
+    from prove_or_abstain.llm import QwenClient
+
+    responses = [
+        _json.dumps({"dim_columns": ["category", "platform"], "metric_column": "metric",
+                     "n_column": "total_conversions", "c_column": "total_users",
+                     "reason": "first guess"}),
+        _json.dumps({"dim_columns": ["category", "platform"], "metric_column": "metric",
+                     "n_column": "total_users", "c_column": "total_conversions",
+                     "self_verified": False, "reason": "corrected an n/c swap"}),
+    ]
+    calls = {"i": 0}
+
+    def fake_complete(self, system, user, **kw):
+        i = calls["i"]
+        calls["i"] += 1
+        return responses[i]
+
+    monkeypatch.setattr(QwenClient, "complete", fake_complete)
+    qc = QwenClient(mock=False, model="stub")
+    out = qc.map_schema(
+        ["metric", "category", "platform", "total_users", "total_conversions"],
+        [{"metric": "conversion", "category": "paid", "platform": "mobile",
+          "total_users": 3000, "total_conversions": 210}])
+    assert calls["i"] == 2                    # both passes actually ran
+    assert out["n_column"] == "total_users"    # the CORRECTED mapping, not the first
+    assert out["c_column"] == "total_conversions"
+    assert out["self_verified"] is False
+
+
+def test_schema_mapping_rejects_incoherent_mapping_before_the_math():
+    """Data map_schema can't make sense of (no metric/n/c hints at all) is
+    rejected by _validate_panel before it ever reaches gates.py — mock or
+    real, the deterministic backstop is the same."""
+    df = pd.DataFrame({"foo": ["a", "b"], "bar": ["c", "d"], "baz": [1, 2]})
+    r = client.post("/sources/badmapping/observe",
+                    files={"panel": ("bad.csv", _csv(df), "text/csv")})
+    assert r.status_code == 400
+
+
+def test_schema_mapping_end_to_end_via_examples(tmp_path):
+    """examples/schema_mapping_seed.csv + _next.csv: non-standard column
+    names (category/platform/total_users/total_conversions), non-round
+    sample sizes (jittered, not a flat 5000/3000/1500/500), mapped via
+    map_schema() (mock mode) onto the long-panel contract, localizing to a
+    referral-segment collapse — deliberately a different segment and a
+    different drop magnitude than panels.CLEAN, so this isn't just the same
+    scenario relabeled."""
+    from prove_or_abstain import memory
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent / "examples"
+    memory.reset()
+    seed = (root / "schema_mapping_seed.csv").read_bytes()
+    nxt = (root / "schema_mapping_next.csv").read_bytes()
+    client.post("/sources/rawschema/observe", files={"panel": ("seed.csv", seed, "text/csv")})
+    r = client.post("/sources/rawschema/observe", files={"panel": ("next.csv", nxt, "text/csv")})
+    body = r.json()
+    assert body["verdict"] == "ASSERT"
+    assert body["root_cause"] == {"dimension": "category", "segment": "referral"}
+
+
+# ----------------------------------------------- real, external data (not synthetic)
+# Every other example in examples/ is hand-constructed with a known, planted
+# cause — necessary to prove the math against a ground truth, but every
+# scenario ends up suspiciously round (n in the thousands, a 7%->5% drop
+# reused verbatim in more than one place). These two are real public
+# datasets (seaborn-data's flights.csv and titanic.csv, MIT-licensed),
+# reshaped into the long-panel contract but with none of the numbers
+# invented: real group sizes (7 to 353), real noise, no planted answer.
+
+def test_real_flights_1960_growth_is_systemic_not_seasonal():
+    """seaborn-data/flights.csv: real monthly airline passenger counts,
+    1949-1960. 1960 grew +11.2% over 1959 (a real trend — postwar air
+    travel boom) but the growth is NOT concentrated in any one month
+    (concentration well under 0.55) — a genuine ABSTAIN, not a planted one."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent / "examples"
+    r = client.post("/investigate/series",
+                    files={"series": ("flights.csv",
+                          (root / "real_flights_series.csv").read_bytes(), "text/csv")},
+                    data={"window": "1", "sum_metrics": "passengers"})
+    body = r.json()
+    assert body["verdict"] == "ABSTAIN"
+    assert body["gates"]["month"]["concentration"] < 0.3
+
+
+def test_real_titanic_survival_gap_localizes_to_sex_not_class():
+    """seaborn-data/titanic.csv: real passenger manifest. Comparing
+    Southampton (n=644) against Cherbourg (n=168) passengers, overall
+    survival jumps from 34% to 55%. Historically this is usually attributed
+    to Cherbourg carrying more 1st-class passengers — but decomposed
+    honestly, 'pclass' alone does NOT clear the significance gate (p=0.10,
+    small samples once split further), while 'sex' does (p=0.0018): the
+    well-documented 'women and children first' effect dominates. Confidence
+    is genuinely low (real data, not a clean planted scenario) — an honest
+    RECOMMEND, not a confident EXECUTE."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent / "examples"
+    r = client.post("/investigate/upload", files={
+        "baseline": ("southampton.csv",
+                    (root / "real_titanic_southampton.csv").read_bytes(), "text/csv"),
+        "current": ("cherbourg.csv",
+                   (root / "real_titanic_cherbourg.csv").read_bytes(), "text/csv"),
+    })
+    body = r.json()
+    assert body["verdict"] == "ASSERT"
+    assert body["root_cause"] == {"dimension": "sex", "segment": "female"}
+    assert body["gates"]["pclass"]["verdict"] == "ABSTAIN"     # the popular guess doesn't hold up
+    assert body["confidence"] < 0.3                            # real data: honestly uncertain
+    assert body["action"]["kind"] == "RECOMMEND"               # too low-confidence to auto-execute
 
 
 # --------------------------------------------------- SSE streaming + fallback

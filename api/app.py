@@ -23,12 +23,10 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-import math
 from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 
-import numpy as np
 import pandas as pd
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -37,15 +35,16 @@ from pydantic import BaseModel, Field
 
 load_dotenv()
 
-from prove_or_abstain.autopilot import get_dashboard, record_check, resolve_execution, record_execution, get_executions
-from prove_or_abstain.webhook import notify
+from prove_or_abstain import ingest, memory
+from prove_or_abstain.agent_loop import investigate_agentic
+from prove_or_abstain.autopilot import get_dashboard, record_check, resolve_execution, get_executions
 from prove_or_abstain.connectors.gsheets import SheetError
 from prove_or_abstain.connectors.gsheets import fetch_panel as fetch_sheet_panel
 from prove_or_abstain.connectors.sql import SqlQueryError, fetch_panel as fetch_sql_panel
-from prove_or_abstain.agent_loop import investigate_agentic
-from prove_or_abstain.graph import APP as INVESTIGATION_GRAPH
+from prove_or_abstain.investigate import _jsonable, _run_investigation
 from prove_or_abstain.llm import get_client
-from prove_or_abstain.panels import BASELINE, CLEAN, DEEP, DIFFUSE, MIXSHIFT, split_series
+from prove_or_abstain.panels import (BASELINE, CLEAN, DEEP, DIFFUSE, MIXSHIFT,
+                                     DEVICES, SEGMENTS, split_series)
 
 # docs_url=None frees /docs from the built-in Swagger route so the
 # redirect below can point it at ReDoc instead.
@@ -66,6 +65,10 @@ _PANEL_DESCRIPTIONS = {
             "narrows it further",
 }
 _METRICS = ["conversion", "activation"]
+# Known segment values of the built-in panels' dimensions — handed to the LLM
+# router (/investigate/query) so a follow-up ("and on mobile only?") can SELECT
+# a filter among these, never invent one outside them.
+_DIM_VALUES = {"device": DEVICES, "segment": SEGMENTS}
 _STATIC = Path(__file__).parent / "static"
 _REQUIRED = {"metric", "n", "c"}             # mandatory long-panel columns
 _RESERVED = _REQUIRED | {"period"}           # non-dimension columns
@@ -82,6 +85,10 @@ class InvestigateRequest(BaseModel):
 class QueryRequest(BaseModel):
     query: str                # free-text question, e.g. "why did conversion drop?"
     autopilot: bool = False
+    # Set this to the `panel` field of a previous /investigate/query response
+    # to ask a follow-up in the same conversation ("and on mobile only?")
+    # instead of re-routing from scratch.
+    previous_panel: Literal["clean", "diffuse", "mixshift", "deep"] | None = None
 
 
 class SqlRequest(BaseModel):
@@ -97,89 +104,6 @@ class SheetsRequest(BaseModel):
     current_url: str
     autopilot: bool = False
     sum_metrics: str = ""
-
-
-def _jsonable(v):
-    """Flatten numpy scalars / NaN in a final state down to strict JSON —
-    necessary as soon as the panels come from a user CSV."""
-    if isinstance(v, dict):
-        return {k: _jsonable(x) for k, x in v.items()}
-    if isinstance(v, (list, tuple)):
-        return [_jsonable(x) for x in v]
-    if isinstance(v, np.generic):
-        v = v.item()
-    if isinstance(v, float) and math.isnan(v):
-        return None
-    return v
-
-
-def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
-                       metrics: list[str], dims: list[str],
-                       autopilot: bool,
-                       metric_kinds: dict | None = None,
-                       mode: str = "graph") -> dict:
-    state = {
-        "baseline": baseline,
-        "current": current,
-        "metrics": metrics,
-        "metric_kinds": metric_kinds or {},
-        "dims": dims,
-        "autopilot_enabled": autopilot,
-        "trace": [],
-    }
-    # Snapshot the cost tracker so `cost` reports THIS request's spend, not the
-    # process-cumulative total (0 in mock mode).
-    _client = get_client()
-    _tok0, _usd0 = _client.tracker.total_tokens, _client.tracker.cost_usd
-
-    # Both paths produce the same verdict; "agent" adds Qwen's tool-call trace.
-    final = investigate_agentic(state) if mode == "agent" \
-        else INVESTIGATION_GRAPH.invoke(state)
-
-    win = final.get("winning_report")
-    drill = final.get("drilldown")
-
-    actions = final.get("actions")
-    if actions and actions[0].kind == "EXECUTE":
-        a = actions[0]
-        cause = f"{a.dim}={a.segment}" if a.dim else None
-        record_execution(
-            a.metric, a.dim, a.segment, final.get("confidence", 0.0),
-            a.kind, a.detail,
-            final.get("report", ""), final.get("trace", []),
-        )
-        notify(a.metric, final.get("verdict", "ASSERT"),
-               final.get("confidence", 0.0),
-               cause, a.kind, a.detail)
-
-    return _jsonable({
-        "verdict": final.get("verdict"),
-        "confidence": final.get("confidence"),
-        "root_cause": (
-            {"dimension": final.get("winning_dim"), "segment": win.leading_segment}
-            if win is not None
-            else None
-        ),
-        "gates": {dim: asdict(rep) for dim, rep in final.get("reports_by_dim", {}).items()},
-        "drilldown": (
-            {"parent": drill["parent"],
-             "refined": drill["refined"],
-             "gates": {d: asdict(r) for d, r in drill["reports_by_dim"].items()}}
-            if drill
-            else None
-        ),
-        "action": asdict(final["actions"][0]) if final.get("actions") else None,
-        "report": final.get("report"),
-        "speculations": final.get("speculations", []),
-        "llm": final.get("llm"),
-        "cost": {
-            "model": _client.tracker.model,
-            "tokens": _client.tracker.total_tokens - _tok0,
-            "usd": round(_client.tracker.cost_usd - _usd0, 6),
-        },
-        "trace": final.get("trace", []),
-        "agent_trace": final.get("agent_trace", []),
-    })
 
 
 @app.get("/")
@@ -275,17 +199,46 @@ def investigate_query(req: QueryRequest) -> dict:
     the four demo panels/metrics from `req.query` (never invents one —
     guarded in llm.route_query), then the same deterministic pipeline runs
     unchanged. Demonstrates the LLM boundary on a natural-language intent
-    rather than a hardcoded panel name."""
+    rather than a hardcoded panel name.
+
+    Conversational follow-up: pass `previous_panel` (the `panel` field of an
+    earlier response) and a text like "and on mobile only?" — Qwen may also
+    SELECT a (dim, segment) filter from the panel's known values (never
+    invents one), and the same panel is filtered to it before re-running the
+    unchanged pipeline. A single stateless call: the caller carries the
+    conversation, not the server."""
     if not req.query.strip():
         raise HTTPException(400, "query must not be empty")
-    routed = get_client().route_query(req.query, _PANEL_DESCRIPTIONS, _METRICS)
+    routed = get_client().route_query(req.query, _PANEL_DESCRIPTIONS, _METRICS,
+                                      dims=_DIM_VALUES, previous_panel=req.previous_panel)
+    base, curr = BASELINE, _PANELS[routed["panel"]]
+    filt = routed.get("filter")
+    if filt:
+        base = base[base[filt["dim"]] == filt["segment"]]
+        curr = curr[curr[filt["dim"]] == filt["segment"]]
     result = _run_investigation(
-        BASELINE, _PANELS[routed["panel"]],
+        base, curr,
         metrics=_METRICS,
         dims=["device", "segment"],
         autopilot=req.autopilot,
     )
     return {"panel": routed["panel"], "routing": routed, **result}
+
+
+@app.post("/investigate/suggest")
+def investigate_suggest(baseline: UploadFile = File(...)) -> dict:
+    """Setup helper for bring-your-own-data. Dimensions need no suggestion —
+    every non-reserved CSV column IS a dimension, exactly (see
+    _investigate_pair below). What genuinely needs judgment is classifying
+    each metric NAME as rate or sum, so Qwen does that one step; the caller
+    still confirms before /investigate/upload runs anything."""
+    df = _read_panel(baseline, "baseline")
+    dims = [c for c in df.columns if c not in _RESERVED]
+    metrics = sorted(df["metric"].unique())
+    suggestion = get_client().suggest_setup(metrics)
+    client = get_client()
+    return {"dims": dims, "metrics": metrics, **suggestion,
+            "llm": {"model": client.model, "mode": client.last_mode}}
 
 
 def _dataset_payload(base: pd.DataFrame, curr: pd.DataFrame) -> dict:
@@ -440,6 +393,79 @@ def investigate_series(series: UploadFile = File(...),
     result = _investigate_pair(base, curr, "series baseline", "series current",
                                autopilot, sum_metrics)
     return {"panel": "series", **result}
+
+
+# ------------------------------------------------------------ watch a source
+def _read_raw_csv(upload: UploadFile, name: str) -> pd.DataFrame:
+    """Like _read_panel, but WITHOUT the long-panel contract check — the
+    caller decides whether the columns are already conformant or need
+    map_schema() first."""
+    try:
+        return pd.read_csv(io.BytesIO(upload.file.read()))
+    except Exception as exc:
+        raise HTTPException(400, f"{name}: not a readable CSV ({exc})")
+
+
+def _apply_schema_mapping(df: pd.DataFrame, name: str) -> pd.DataFrame:
+    """Reshape a raw upload onto [metric, dims..., n, c] via llm.map_schema()
+    — Qwen's decision is used directly (no human confirmation gate) but is
+    always run through the same _validate_panel every other data source
+    goes through, so an incoherent mapping is rejected before it reaches
+    the math either way."""
+    columns = list(df.columns)
+    sample_rows = df.head(5).to_dict(orient="records")
+    mapping = get_client().map_schema(columns, sample_rows)
+    metric_col, n_col, c_col = (mapping.get("metric_column"),
+                                mapping.get("n_column"), mapping.get("c_column"))
+    if not (metric_col and n_col and c_col):
+        raise HTTPException(
+            400, f"{name}: could not identify metric/n/c columns among "
+                f"{columns} (mapping: {mapping})")
+    renamed = df.rename(columns={metric_col: "metric", n_col: "n", c_col: "c"})
+    return _validate_panel(renamed, name)
+
+
+@app.post("/sources/{source_id}/observe")
+def observe_source(source_id: str,
+                   panel: UploadFile = File(...),
+                   sum_metrics: str = Form(""),
+                   autopilot: bool = Form(False),
+                   mode: Literal["graph", "agent"] = Form("graph"),
+                   window: int | None = Form(None)) -> dict:
+    """"Watch a source": send ONE observation tagged `source_id`. The first
+    observation for a new source_id only seeds (cold_start=True, no
+    verdict yet — nothing to compare against). Every observation after that
+    is compared automatically to the pooled reference window of everything
+    persisted so far for this source_id — no baseline file to supply by
+    hand. Complements, not replaces, the explicit two-file endpoints above
+    (/investigate/upload etc.), which remain the right tool for a one-off
+    "compare these two periods" analysis with no ingestion history."""
+    raw = _read_raw_csv(panel, "panel")
+    if _REQUIRED - set(raw.columns):
+        df = _apply_schema_mapping(raw, "panel")
+    else:
+        df = _validate_panel(raw, "panel")
+
+    dims = [c for c in df.columns if c not in _RESERVED]
+    metrics = sorted(df["metric"].unique())
+    kinds = _parse_kinds(sum_metrics, metrics)
+    _validate_rate_counts(df, "panel", kinds)
+
+    result = ingest.ingest_and_investigate(
+        source_id, df, metrics=metrics, dims=dims, metric_kinds=kinds,
+        autopilot=autopilot, mode=mode, window=window)
+    return result
+
+
+@app.get("/sources/{source_id}/observations")
+def source_observations(source_id: str, limit: int | None = None) -> dict:
+    """Read-only: the persisted observation history for a watched source."""
+    obs = memory.get_observations(source_id, limit=limit)
+    return _jsonable({"source_id": source_id, "count": len(obs), "observations": [
+        {"id": o["id"], "observed_at": o["observed_at"], "dims": o["dims"],
+         "metrics": o["metrics"], "panel": o["panel"].to_dict(orient="records")}
+        for o in obs
+    ]})
 
 
 # ----------------------------------------------------------- autonomous autopilot

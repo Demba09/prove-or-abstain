@@ -23,6 +23,7 @@ from prove_or_abstain.gates import evaluate_gates, MATERIAL_REL
 from prove_or_abstain.agent_state import AgentState, MetricAnomaly, Action
 from prove_or_abstain.panels import metric_totals, project
 from prove_or_abstain.llm import get_client, template_report
+from prove_or_abstain.evidence import find_events
 
 
 def _log(state: AgentState, msg: str) -> list[str]:
@@ -277,6 +278,9 @@ def reporter(state: AgentState) -> dict:
             refined = (state.get("drilldown") or {}).get("refined")
             if refined:
                 payload["refined"] = f"{refined['dim']}={refined['segment']}"
+                payload["events"] = find_events(refined["dim"], refined["segment"])
+            else:
+                payload["events"] = find_events(state["winning_dim"], rep.leading_segment)
             speculations = get_client().speculate_causes(payload)
         else:  # ABSTAIN
             reports = state.get("reports_by_dim", {})

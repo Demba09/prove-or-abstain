@@ -1,0 +1,17 @@
+metric,segment,device,plan,n,c
+conversion,organic,mobile,free,2142,135
+conversion,organic,mobile,pro,2098,191
+conversion,organic,desktop,free,2161,136
+conversion,organic,desktop,pro,2072,189
+conversion,paid,mobile,free,2078,131
+conversion,paid,mobile,pro,2197,200
+conversion,paid,desktop,free,2084,131
+conversion,paid,desktop,pro,2153,196
+conversion,referral,mobile,free,2209,139
+conversion,referral,mobile,pro,2074,189
+conversion,referral,desktop,free,2189,138
+conversion,referral,desktop,pro,2114,192
+conversion,email,mobile,free,2069,130
+conversion,email,mobile,pro,2082,189
+conversion,email,desktop,free,2171,137
+conversion,email,desktop,pro,2167,197

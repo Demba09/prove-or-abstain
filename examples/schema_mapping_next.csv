@@ -1,0 +1,9 @@
+metric,category,platform,total_users,total_conversions
+conversion,organic,mobile,4837,295
+conversion,organic,desktop,4796,293
+conversion,paid,mobile,3153,259
+conversion,paid,desktop,3157,259
+conversion,referral,mobile,1757,107
+conversion,referral,desktop,1734,106
+conversion,email,mobile,615,83
+conversion,email,desktop,647,87

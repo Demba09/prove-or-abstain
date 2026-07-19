@@ -333,6 +333,26 @@ footer a { color: var(--accent-strong); }
           <button class="secondary" type="button" id="sheetsBtn">investigate sheets</button>
         </div>
 
+        <div class="divider"></div>
+
+        <p class="eyebrow">Watch a source — no baseline file needed</p>
+        <p class="field-label" style="margin:-4px 0 8px;">Send one observation at a time, tagged with an id you choose.
+          The first call for a new id only seeds it (nothing to compare against yet); every call after that is
+          compared automatically to everything persisted so far for that id — the baseline lives in the database,
+          not in a file you re-upload. Columns don't have to match <code>metric, dims..., n, c</code> exactly —
+          Qwen maps unfamiliar ones (see <code>examples/schema_mapping_seed.csv</code>).</p>
+        <div class="upload-row">
+          <div class="field">
+            <label class="field-label" for="sourceId">Source id — reuse it across calls to build history</label>
+            <input type="text" id="sourceId" placeholder="my-dashboard-metric" value="demo-source">
+          </div>
+          <div class="field">
+            <label class="field-label" for="observation">One observation — same long-panel shape, or a raw source</label>
+            <input type="file" id="observation" accept=".csv">
+          </div>
+          <button class="secondary" type="button" id="observeBtn">send observation</button>
+        </div>
+
       </div>
     </details>
 
@@ -482,6 +502,17 @@ function runSheets() {
   });
 }
 
+function runObserve() {
+  const sourceId = $('sourceId').value.trim();
+  const obs = $('observation').files[0];
+  if (!sourceId || !obs) return fail('Give this source an id and pick a file to send.');
+  setActiveTab(null);
+  const fd = new FormData();
+  fd.append('panel', obs);
+  fd.append('autopilot', $('autopilot').checked);
+  call(`/sources/${encodeURIComponent(sourceId)}/observe`, {method: 'POST', body: fd});
+}
+
 function render(b) {
   $('result').style.display = 'block';
 
@@ -490,6 +521,7 @@ function render(b) {
     $('routing').style.display = 'block';
     $('routing').textContent = `routed to panel ${b.panel}` +
       (b.routing.metric ? ` · metric ${b.routing.metric}` : '') +
+      (b.routing.filter ? ` · filtered to ${b.routing.filter.dim}=${b.routing.filter.segment}` : '') +
       (b.routing.reason ? ` — ${b.routing.reason}` : '');
   } else {
     $('routing').style.display = 'none';
@@ -501,9 +533,14 @@ function render(b) {
   stamp.className = 'stamp ' + (v === 'ASSERT' ? 'assert' : v === 'ABSTAIN' ? 'abstain' : 'none');
 
   const metaParts = [];
-  if (b.confidence != null) metaParts.push(`confidence <span class="num">${b.confidence.toFixed(2)}</span>`);
-  if (b.root_cause) metaParts.push(`root cause <b>${b.root_cause.dimension} = ${b.root_cause.segment}</b>`);
-  else if (v === 'ABSTAIN') metaParts.push('no localized cause');
+  if (b.cold_start) {
+    metaParts.push(`source <b>${b.source_id}</b> seeded — send another observation for it to compare against`);
+  } else {
+    if (b.source_id) metaParts.push(`source <b>${b.source_id}</b>`);
+    if (b.confidence != null) metaParts.push(`confidence <span class="num">${b.confidence.toFixed(2)}</span>`);
+    if (b.root_cause) metaParts.push(`root cause <b>${b.root_cause.dimension} = ${b.root_cause.segment}</b>`);
+    else if (v === 'ABSTAIN') metaParts.push('no localized cause');
+  }
   $('meta').innerHTML = metaParts.join(' &nbsp;·&nbsp; ');
 
   const exhibits = $('exhibits');
@@ -669,6 +706,7 @@ $('query').addEventListener('keydown', e => { if (e.key === 'Enter') runQuery();
 $('uploadBtn').addEventListener('click', runUpload);
 $('sqlBtn').addEventListener('click', runSql);
 $('sheetsBtn').addEventListener('click', runSheets);
+$('observeBtn').addEventListener('click', runObserve);
 
 // ---------------------------------------------------------------- dashboard
 async function loadDashboard() {

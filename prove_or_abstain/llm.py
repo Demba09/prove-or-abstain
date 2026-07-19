@@ -12,11 +12,27 @@ decides no verdict. It does exactly four things:
     labelled as unverified speculation, kept apart from the proven verdict.
   - route_query()     : map a free-text question to one of the built-in
     panels/metrics. It only SELECTS among options the caller supplies —
-    it cannot invent a panel or metric that doesn't exist.
+    it cannot invent a panel or metric that doesn't exist. On a follow-up
+    turn it may also SELECT a (dim, segment) filter mentioned in the text,
+    from the values the caller supplies — same rule, no invention.
   - chat_with_tools() : ORCHESTRATE an investigation via tool calls. Qwen
     chooses which dimensions to test and when to stop; the tools run the
     same deterministic math, and the verdict is recomputed from the gate
     reports afterwards — so Qwen drives the path, never the outcome.
+  - suggest_setup()   : CLASSIFY each metric name found in an unfamiliar
+    upload as "rate" or "sum", from the name alone — the one setup step
+    that is actually a text-understanding task (dimensions are inferred
+    exactly, with no ambiguity, from the CSV's own columns; see
+    api/app.py:_investigate_pair). Never invents a metric name outside
+    the ones supplied.
+  - map_schema()      : MAP an unfamiliar RAW source's columns onto the
+    long-panel contract [metric, dims..., n, c] — dimensions, metric name,
+    n/c counts. The ONE exception to "the verdict never depends on Qwen":
+    interpreting ambiguous column names has no single deducible answer, so
+    mock and real mode can genuinely disagree here. The only place with a
+    2nd, self-verification pass in real mode (Qwen re-checks its own first
+    answer before it's acted on) — see its docstring for why. Never invents
+    a column name outside the ones supplied, at either pass.
 
 Mock mode: if DASHSCOPE_API_KEY is absent or QWEN_MOCK=1, no network call is
 made and deterministic outputs are returned — the pipeline runs offline.
@@ -215,8 +231,12 @@ class QwenClient:
             "given segment. Suggest 2 plausible BUSINESS hypotheses for the root "
             "cause (campaign, pricing, product, technical...). These are "
             "speculations for a human to verify: do not invent any figure, do not "
-            "restate the verdict. Return ONLY a JSON array of 2 short strings in "
-            "English, each phrased as a question."
+            "restate the verdict. If 'events' lists operational events already "
+            "logged for this exact segment, GROUND at least one hypothesis in the "
+            "most relevant one (name it and its date) instead of guessing blindly; "
+            "still phrase it as something for a human to confirm, not a fact. "
+            "Do not invent an event outside the supplied list. Return ONLY a JSON "
+            "array of 2 short strings in English, each phrased as a question."
         )
         try:
             parsed = self._robust_parse_json(self.complete(system,
@@ -249,37 +269,50 @@ class QwenClient:
             self.last_mode, self.last_error = "fallback", str(exc)
             return template_report(payload)
 
-    # --- use 4: route a free-text question to a built-in panel/metric ---
+    # --- use 4: route a free-text question to a built-in panel/metric, and
+    # (on a follow-up) SELECT a segment filter mentioned in the text ---
     # (selects among caller-supplied options only — invents neither) ---
     def route_query(self, query: str, panels: dict[str, str],
-                    metrics: list[str]) -> dict:
-        """panels: {panel_name: short description}. Returns
-        {"panel": <one of panels>, "metric": <one of metrics or None>,
-         "reason": <short text>}. Falls back to a deterministic keyword
-        match in mock mode or on any error — never raises, never picks a
-        value outside the supplied options."""
+                    metrics: list[str], dims: dict[str, list] | None = None,
+                    previous_panel: str | None = None) -> dict:
+        """panels: {panel_name: short description}.
+        dims: {dim_name: [known segment values]} of the ACTIVE panel — pass
+        this on a follow-up turn ("and on mobile only?") so the router can
+        also extract a filter. Returns {"panel": <one of panels>,
+        "metric": <one of metrics or None>, "filter": {"dim":.., "segment":..}
+        or None, "reason": <short text>}. Falls back to a deterministic
+        keyword match in mock mode or on any error — never raises, never
+        picks a value outside the supplied options."""
         if self.mock:
             self.last_mode, self.last_error = "mock", None
-            return template_route_query(query, panels, metrics)
+            return template_route_query(query, panels, metrics, dims, previous_panel)
         system = (
             "You route a user's free-text question to ONE of the given analysis "
             "panels and (optionally) ONE of the given metrics. You do not compute "
             "or verify anything — the panel already contains the data; a "
-            "deterministic pipeline will investigate it. Return ONLY a JSON "
-            "object: {\"panel\": <one of the panel names>, "
+            "deterministic pipeline will investigate it. If 'dims' is given, the "
+            "user may be following up on a previous result (e.g. 'and on mobile "
+            "only?'): if the text clearly names ONE known segment value from "
+            "'dims', return it as a filter; otherwise filter is null. If "
+            "'previous_panel' is given and the text does not name a different "
+            "scenario, keep using previous_panel. Return ONLY a JSON object: "
+            "{\"panel\": <one of the panel names>, "
             "\"metric\": <one of the metric names, or null>, "
-            "\"reason\": <one short sentence>}. If unsure, pick the closest panel "
-            "by description and set metric to null."
+            "\"filter\": {\"dim\": <one of dims' keys>, \"segment\": <one of "
+            "that dim's values>} or null, "
+            "\"reason\": <one short sentence>}. If unsure, pick the closest "
+            "panel by description and set metric/filter to null."
         )
-        user = json.dumps({"query": query, "panels": panels, "metrics": metrics},
+        user = json.dumps({"query": query, "panels": panels, "metrics": metrics,
+                           "dims": dims or {}, "previous_panel": previous_panel},
                           ensure_ascii=False)
         try:
             raw = self._robust_parse_json(self.complete(
-                system, user, max_tokens=150,
+                system, user, max_tokens=200,
                 response_format={"type": "json_object"}), {})
             if not isinstance(raw, dict):
                 raise ValueError("router did not return an object")
-            panel = raw.get("panel")
+            panel = raw.get("panel") or previous_panel
             metric = raw.get("metric")
             if panel not in panels:
                 raise ValueError(f"model picked an unknown panel: {panel!r}")
@@ -287,10 +320,143 @@ class QwenClient:
                 metric = None
             self.last_mode, self.last_error = "real", None
             return {"panel": panel, "metric": metric,
+                   "filter": _guard_filter(raw.get("filter"), dims),
                    "reason": raw.get("reason", "")}
         except Exception as exc:
             self.last_mode, self.last_error = "fallback", str(exc)
-            return template_route_query(query, panels, metrics)
+            return template_route_query(query, panels, metrics, dims, previous_panel)
+
+    # --- use 6: classify each metric NAME as "rate" or "sum" — the only
+    # setup step where the caller doesn't already know the answer exactly.
+    # Dimensions need no classification: every non-reserved CSV column IS a
+    # dimension, with no ambiguity (see api/app.py:_investigate_pair). ---
+    def suggest_setup(self, metrics: list[str]) -> dict:
+        """Returns {"sum_metrics": <subset of metrics>, "reason": <text>}.
+        Never returns a name outside `metrics`."""
+        if self.mock:
+            self.last_mode, self.last_error = "mock", None
+            return template_suggest_setup(metrics)
+        system = (
+            "You are given the metric names found in an uploaded dataset (a "
+            "long panel of [metric, dimensions..., n, c] rows: n = population, "
+            "c = a count). For each metric name, decide whether it is a RATE "
+            "(c is a count of successes out of n — e.g. conversion, activation, "
+            "click-through) or a SUM (c is a total quantity, not bounded by n — "
+            "e.g. revenue, spend, refunds). Judge from the name alone. Return "
+            "ONLY a JSON object: {\"sum_metrics\": [<names from the supplied "
+            "list that are SUM-kind>], \"reason\": <one short sentence>}. Do "
+            "not invent a metric name outside the supplied list."
+        )
+        user = json.dumps({"metrics": metrics}, ensure_ascii=False)
+        try:
+            raw = self._robust_parse_json(self.complete(
+                system, user, max_tokens=150,
+                response_format={"type": "json_object"}), {})
+            if not isinstance(raw, dict):
+                raise ValueError("suggest_setup did not return an object")
+            sum_metrics = [m for m in raw.get("sum_metrics", []) if m in metrics]
+            self.last_mode, self.last_error = "real", None
+            return {"sum_metrics": sum_metrics, "reason": raw.get("reason", "")}
+        except Exception as exc:
+            self.last_mode, self.last_error = "fallback", str(exc)
+            return template_suggest_setup(metrics)
+
+    # --- use 7: map an unfamiliar RAW source's columns onto the long-panel
+    # contract [metric, dims..., n, c] — the one place Qwen decides the
+    # SHAPE of the data feeding the calculation, not just its order, its
+    # wording, or a choice among already-known values. Unlike every other
+    # use above, this means the final result CAN differ between mock and
+    # real mode: interpreting ambiguous column names has no single
+    # mechanically-deducible answer (that's the whole reason Qwen is asked
+    # at all). The trade for that honesty: Qwen's decision is used directly,
+    # not gated behind a human confirmation — but it self-verifies in a 2nd
+    # pass before acting, catching its own misreads the same way a careful
+    # analyst re-checks their own work. Never invents a column name outside
+    # the ones supplied, at either pass. ---
+    def map_schema(self, columns: list[str], sample_rows: list[dict]) -> dict:
+        """Returns {"dim_columns": [...], "metric_column": <name or None>,
+        "n_column": <name or None>, "c_column": <name or None>,
+        "self_verified": bool, "reason": <text>}. In mock mode, a single
+        deterministic pass (self_verified=True — the template has no doubt
+        to re-examine). In real mode, a proposal pass followed by a
+        self-verification pass that may correct it."""
+        if self.mock:
+            self.last_mode, self.last_error = "mock", None
+            return template_map_schema(columns, sample_rows)
+
+        propose_system = (
+            "You are given the column names and a few sample rows of a raw "
+            "dataset that must be reshaped into a long panel "
+            "[metric, dimensions..., n, c]. Identify: the ONE column holding "
+            "the metric name (categorical, e.g. 'conversion'/'revenue'), the "
+            "ONE column that is the population/denominator count (n), the "
+            "ONE column that is the success/numerator or total count (c), "
+            "and which of the REMAINING columns are dimensions (categorical "
+            "breakdown columns, e.g. platform/category/country). Return ONLY "
+            "a JSON object: {\"dim_columns\": [...], \"metric_column\": "
+            "<name or null>, \"n_column\": <name or null>, \"c_column\": "
+            "<name or null>, \"reason\": <one short sentence>}. Do not "
+            "invent a column name outside the supplied list."
+        )
+        user = json.dumps({"columns": columns, "sample_rows": sample_rows[:5]},
+                          ensure_ascii=False)
+        try:
+            proposed = self._guarded_schema_mapping(
+                self._robust_parse_json(self.complete(
+                    propose_system, user, max_tokens=200,
+                    response_format={"type": "json_object"}), {}),
+                columns)
+
+            verify_system = (
+                "You just proposed this column mapping for a raw dataset. "
+                "Re-examine it against the sample rows: does each column "
+                "really hold what you assigned it (metric name / population "
+                "count n / success-or-total count c / dimension)? If "
+                "something looks wrong, correct it. Return ONLY a JSON "
+                "object with the FINAL mapping (corrected or unchanged): "
+                "{\"dim_columns\": [...], \"metric_column\": <name or null>, "
+                "\"n_column\": <name or null>, \"c_column\": <name or null>, "
+                "\"self_verified\": <true if you kept your first answer, "
+                "false if you corrected it>, \"reason\": <one short "
+                "sentence>}. Do not invent a column name outside the "
+                "supplied list."
+            )
+            verify_user = json.dumps({"columns": columns, "sample_rows": sample_rows[:5],
+                                      "proposed_mapping": proposed}, ensure_ascii=False)
+            final = self._guarded_schema_mapping(
+                self._robust_parse_json(self.complete(
+                    verify_system, verify_user, max_tokens=200,
+                    response_format={"type": "json_object"}), {}),
+                columns)
+            final["self_verified"] = bool(final.get("self_verified", True))
+            self.last_mode, self.last_error = "real", None
+            return final
+        except Exception as exc:
+            self.last_mode, self.last_error = "fallback", str(exc)
+            return template_map_schema(columns, sample_rows)
+
+    @staticmethod
+    def _guarded_schema_mapping(raw: dict, columns: list[str]) -> dict:
+        """Anti-invention guard shared by both map_schema() passes: every
+        returned column name must be one actually supplied, else dropped —
+        same discipline as _guard_filter()/suggest_setup()."""
+        if not isinstance(raw, dict):
+            raise ValueError("map_schema did not return an object")
+        cols = set(columns)
+        metric_col = raw.get("metric_column")
+        n_col = raw.get("n_column")
+        c_col = raw.get("c_column")
+        metric_col = metric_col if metric_col in cols else None
+        n_col = n_col if n_col in cols else None
+        c_col = c_col if c_col in cols else None
+        dim_cols = [c for c in raw.get("dim_columns", [])
+                   if c in cols and c not in (metric_col, n_col, c_col)]
+        out = {"dim_columns": dim_cols, "metric_column": metric_col,
+              "n_column": n_col, "c_column": c_col,
+              "reason": raw.get("reason", "")}
+        if "self_verified" in raw:
+            out["self_verified"] = raw["self_verified"]
+        return out
 
 
 def template_report(p: dict) -> str:
@@ -315,31 +481,114 @@ def _words(text: str) -> set[str]:
     return set(re.findall(r"[a-z][a-z'-]*", text.lower()))
 
 
+def _guard_filter(raw_filter, dims: dict[str, list] | None) -> dict | None:
+    """A filter is only accepted if it names a dim AND a segment value the
+    caller actually supplied — same anti-invention rule as panel/metric."""
+    if not isinstance(raw_filter, dict) or not dims:
+        return None
+    dim, seg = raw_filter.get("dim"), raw_filter.get("segment")
+    if dim in dims and seg in dims[dim]:
+        return {"dim": dim, "segment": seg}
+    return None
+
+
 def template_route_query(query: str, panels: dict[str, str],
-                         metrics: list[str]) -> dict:
+                         metrics: list[str], dims: dict[str, list] | None = None,
+                         previous_panel: str | None = None) -> dict:
     """Deterministic keyword routing (mock mode / fallback). Picks the
     panel whose name or description shares the most whole words with the
-    query; defaults to the first panel if nothing matches."""
+    query; defaults to the first panel if nothing matches. If `dims` is
+    given, also looks for one known segment value named in the query and
+    returns it as a filter (a follow-up like "and on mobile only?")."""
     q_words = _words(query)
-    best_panel, best_score = next(iter(panels)), -1
-    for name, desc in panels.items():
-        score = len(_words(name + " " + desc) & q_words)
-        if score > best_score:
-            best_panel, best_score = name, score
+
+    panel = previous_panel
+    if panel not in panels:
+        best_panel, best_score = next(iter(panels)), -1
+        for name, desc in panels.items():
+            score = len(_words(name + " " + desc) & q_words)
+            if score > best_score:
+                best_panel, best_score = name, score
+        panel = best_panel
     metric = next((m for m in metrics if m.lower() in q_words), None)
-    return {"panel": best_panel, "metric": metric,
+
+    filt = None
+    for dim, segments in (dims or {}).items():
+        hit = next((s for s in segments if str(s).lower() in q_words), None)
+        if hit is not None:
+            filt = {"dim": dim, "segment": hit}
+            break
+
+    return {"panel": panel, "metric": metric, "filter": filt,
            "reason": "keyword match (mock/fallback routing, no LLM call)"}
 
 
+def template_suggest_setup(metrics: list[str]) -> dict:
+    """Deterministic sum/rate classification (mock mode / fallback): a
+    metric name is treated as SUM-kind if it contains a keyword typical of
+    an unbounded total; everything else defaults to RATE."""
+    _SUM_HINTS = ("revenue", "spend", "cost", "amount", "total", "price",
+                 "value", "refund", "payout", "gmv")
+    sum_metrics = [m for m in metrics if any(h in m.lower() for h in _SUM_HINTS)]
+    return {"sum_metrics": sum_metrics,
+           "reason": "keyword heuristic (mock/fallback, no LLM call)"}
+
+
+def template_map_schema(columns: list[str], sample_rows: list[dict]) -> dict:
+    """Deterministic heuristic column matching (mock mode / fallback), one
+    pass, self_verified=True — no LLM call, so there is nothing for a
+    template to doubt about its own answer."""
+    # Multi-character substrings only: a bare "n" or "c" hint would match as
+    # a substring of almost any word ("category" contains "c") — those are
+    # handled separately below as an exact (case-insensitive) name match.
+    _METRIC_HINTS = ("metric", "event", "kpi")
+    _N_HINTS = ("total", "count", "population", "impressions", "sent", "attempts")
+    _C_HINTS = ("success", "conversion", "converted", "purchase", "click")
+
+    def _first_match(hints, taken):
+        for col in columns:
+            if col in taken:
+                continue
+            if col.lower() in ("n", "c"):     # exact bare name, not a substring guess
+                continue
+            if any(h in col.lower() for h in hints):
+                return col
+        return None
+
+    def _first_exact(name: str, taken):
+        for col in columns:
+            if col not in taken and col.lower() == name:
+                return col
+        return None
+
+    metric_col = _first_match(_METRIC_HINTS, set())
+    n_col = (_first_exact("n", {metric_col})
+            or _first_match(_N_HINTS, {metric_col}))
+    c_col = (_first_exact("c", {metric_col, n_col})
+            or _first_match(_C_HINTS, {metric_col, n_col}))
+    dim_cols = [c for c in columns if c not in (metric_col, n_col, c_col)]
+    return {"dim_columns": dim_cols, "metric_column": metric_col,
+           "n_column": n_col, "c_column": c_col, "self_verified": True,
+           "reason": "keyword heuristic (mock/fallback, no LLM call)"}
+
+
 def template_speculations(p: dict) -> list[str]:
-    """Deterministic speculations (mock mode / fallback)."""
+    """Deterministic speculations (mock mode / fallback). Grounds the first
+    hypothesis in a logged event when one is available for this exact
+    segment (see evidence.py), instead of guessing blindly."""
     tgt = p.get("refined") or f"{p.get('winning_dim')}={p.get('leading_segment')}"
-    return [
-        f"Did anything change recently on the {tgt} side — campaign, pricing, "
-        f"landing page, tracking?",
-        f"Does a technical incident limited to {tgt} (integration, payment, "
-        f"latency) coincide with the period?",
-    ]
+    events = p.get("events") or []
+    out = []
+    if events:
+        e = events[0]
+        out.append(f"A '{e['event']}' event was logged for {tgt} on {e['date']} "
+                   f"({e['source']}) — is this the cause?")
+    else:
+        out.append(f"Did anything change recently on the {tgt} side — campaign, "
+                   f"pricing, landing page, tracking?")
+    out.append(f"Does a technical incident limited to {tgt} (integration, "
+              f"payment, latency) coincide with the period?")
+    return out
 
 
 # --- lazy singleton shared by the nodes ---
