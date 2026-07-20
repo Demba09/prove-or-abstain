@@ -133,6 +133,17 @@ button:disabled { opacity: .5; cursor: wait; }
 .routing-note { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
 .routing-note b { color: var(--ink); }
 
+.busy-indicator { align-items: center; gap: 9px; margin: -6px 0 18px; font-size: 13.5px; color: var(--accent-strong); }
+.spinner {
+  width: 13px; height: 13px; border-radius: 50%; flex: none;
+  border: 2px solid var(--line); border-top-color: var(--accent-strong);
+  animation: spin .7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; opacity: .6; }
+}
+
 #error {
   color: var(--abstain); background: var(--abstain-bg); border: 1px solid var(--abstain);
   border-radius: 7px; padding: 10px 12px; margin-top: 12px; font-size: 13.5px; display: none;
@@ -277,6 +288,10 @@ footer a { color: var(--accent-strong); }
     <h1>prove&#8209;or&#8209;abstain</h1>
   </header>
   <p class="sub">An AI agent that investigates metric changes. It acts when the data proves a cause — and refuses to guess otherwise.</p>
+
+  <div class="busy-indicator" id="busyIndicator" style="display:none;" role="status" aria-live="polite">
+    <span class="spinner" aria-hidden="true"></span> investigating&hellip;
+  </div>
 
   <div class="panel">
     <fieldset>
@@ -474,7 +489,10 @@ function updateQueryLabel() {
   }
 }
 
-function setBusy(b) { document.querySelectorAll('button').forEach(x => x.disabled = b); }
+function setBusy(b) {
+  document.querySelectorAll('button').forEach(x => x.disabled = b);
+  $('busyIndicator').style.display = b ? 'flex' : 'none';
+}
 function fail(msg) { $('error').style.display = 'block'; $('error').textContent = msg; }
 function clearFail() { $('error').style.display = 'none'; }
 
