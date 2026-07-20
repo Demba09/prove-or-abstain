@@ -49,7 +49,7 @@ the agent will always fabricate a plausible-sounding diagnosis — right or wron
 | **Continuous autonomy** | `monitor.py` watches sources, investigates on movement, persists a durable baseline, alerts |
 | **Human-in-the-loop checkpoints** | ABSTAIN always escalates; autopilot requires confidence ≥ 0.70 to execute; alerts resolvable |
 | **Provable, not just a demo** | 20-scenario benchmark (100%, 0% false-ASSERT) — 10 synthetic + 10 real-world datasets, ECE calibration, reproducible audit trails, per-request cost |
-| **Production-ready** | Docker, CI, 105 tests, SQLite persistence, SSE streaming, API docs at `/docs` (ReDoc) |
+| **Production-ready** | Docker, CI, 112 tests, SQLite persistence, SSE streaming, API docs at `/docs` (ReDoc) |
 
 Qwen (via DashScope) orders dimensions, phrases reports, routes questions, and — the one
 deliberate exception — maps an unfamiliar source's columns. Everywhere else the math decides,
@@ -474,16 +474,16 @@ prove_or_abstain/   core package — the deterministic pipeline
   investigate.py      shared state-building/graph-invocation tail (api/app.py + ingest.py)
   webhook.py          outbound notifications on EXECUTE
   cost_tracker.py     token counting + cost estimation
-   benchmark.py        20 ground-truth scenarios (10 synthetic + 10 real) + cross-model eval + ECE calibration
+  benchmark.py        20 ground-truth scenarios (10 synthetic + 10 real) + cross-model eval + ECE calibration
   audit.py            reproducible, verifiable audit trails
   evidence.py         synthetic operational-event lookup, grounds ASSERT speculation
   connectors/         SQL (Postgres/MySQL/SQLite) and Google Sheets
 api/                deployment entry point — FastAPI app + static demo page (SSE stream)
 mcp_server.py       MCP entry point for Qwen Cloud agents
 scripts/            validation & demo tooling (see below)
-tests/              pytest suite (105 tests, runs offline with QWEN_MOCK=1)
-examples/           sample CSVs — synthetic (planted ground truth) + 3 real public datasets
-docs/               architecture diagram, demo script, devpost text
+tests/              pytest suite (112 tests, runs offline with QWEN_MOCK=1)
+examples/           sample CSVs — synthetic (planted ground truth) + 4 real public datasets
+docs/               architecture diagram, demo script, devpost, UI audit, blog
 ```
 
 ## Development setup

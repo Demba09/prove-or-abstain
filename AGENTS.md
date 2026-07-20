@@ -64,7 +64,7 @@ docker run --rm -p 8000:8000 -e QWEN_MOCK=1 prove-or-abstain
 
 ## Before each commit
 
-1. `QWEN_MOCK=1 pytest -q` must pass (105 tests)
+1. `QWEN_MOCK=1 pytest -q` must pass (112 tests)
 2. `ruff check .` must pass (0 errors)
 3. Benchmark must stay at 100% accuracy, 0% false-ASSERT
 4. Commit message in English, one coherent change per commit
@@ -99,7 +99,7 @@ prove_or_abstain/       # core library — math, gates, LLM client, connectors
 api/                    # FastAPI REST layer
   app.py                #   16 endpoints, demo page serve, middleware
 
-tests/                  # 105 tests (single file, 28 marked sections)
+tests/                  # 112 tests (single file, 28 marked sections)
 scripts/                # validation scripts, oracle, manual checks
 docs/                   # devpost, demo script, architecture diagram
 
