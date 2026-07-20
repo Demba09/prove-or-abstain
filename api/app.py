@@ -493,6 +493,13 @@ def _apply_schema_mapping(df: pd.DataFrame, name: str,
     metric_col, n_col, c_col = (mapping.get("metric_column"),
                                 mapping.get("n_column"), mapping.get("c_column"))
 
+    # The mock/fallback map_schema returns a "value_column" when it can
+    # identify a numeric column to aggregate but can't distinguish n from c
+    # by keyword alone (common for raw per-row data like store/week/amount).
+    # Treat it as c — n defaults to row count (aggregation) or 1 below.
+    if not c_col and mapping.get("value_column"):
+        c_col = mapping["value_column"]
+
     # If Qwen couldn't identify a value column but we have a sum_metrics hint,
     # use it: the hint names the metric (e.g. "weekly_sales"), and the column
     # holding that value is likely the c column.
@@ -565,6 +572,15 @@ def observe_source(source_id: str,
     dims = [c for c in df.columns if c not in _RESERVED]
     metrics = sorted(df["metric"].unique())
     kinds = _parse_kinds(sum_metrics, metrics)
+    # Auto-detect sum-kind metrics: when schema mapping was used (n=1 per
+    # row) and c > n for a metric, reclassify it as sum. This handles raw
+    # per-row uploads where the value column is a sum (e.g. amount=100 per
+    # row, n=1) without requiring the caller to pass sum_metrics.
+    if not sum_metrics:
+        for m in metrics:
+            rows = df[df["metric"] == m]
+            if len(rows) and (rows["c"] > rows["n"]).any():
+                kinds[m] = "sum"
     _validate_rate_counts(df, "panel", kinds)
 
     result = ingest.ingest_and_investigate(
