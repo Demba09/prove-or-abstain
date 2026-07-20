@@ -422,7 +422,7 @@ def _write_results_json(graph_m: dict, agent_m: dict, live_evals: dict,
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "generated_by": "python -m prove_or_abstain.benchmark",
-        "note": "graph/agent are the 30 ground-truth scenarios (QWEN_MOCK=1 "
+        "note": "graph/agent are the 20 ground-truth scenarios (QWEN_MOCK=1 "
                 "unless DASHSCOPE_API_KEY is set — reproduce with the command "
                 "above). live_evals only populates with a real key.",
         "graph": graph_m,
