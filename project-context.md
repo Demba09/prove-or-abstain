@@ -44,7 +44,7 @@ API endpoint and MCP tool funnels through this function.
 
 ## The 4 gates (`gates.py`)
 
-The ASSET/ABSTAIN decision requires ALL four gates to pass. Constants:
+The ASSERT/ABSTAIN decision requires ALL four gates to pass. Constants:
 
 | Gate | Threshold | Meaning |
 |------|-----------|---------|
@@ -146,7 +146,7 @@ Modules with potential concurrent access under FastAPI's thread pool:
 ## Glossary
 
 - **Panel**: a DataFrame in long format `[metric, dims..., n, c]`
-- **Gate**: one of the 4 boolean checks that determine ASSET vs ABSTAIN
+- **Gate**: one of the 4 boolean checks that determine ASSERT vs ABSTAIN
 - **Concentration**: the top contributor's share of the total absolute contribution
 - **Interaction**: the non-additive part of the decomposition (mix and rate changed simultaneously)
 - **Drill-down**: after proving a dimension caused the anomaly, re-decompose within

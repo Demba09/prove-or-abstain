@@ -17,7 +17,7 @@ working on this project. Follow these rules to avoid breaking safety guarantees.
    ABSTAIN — do not weaken or remove it.
 
 3. **Mock mode produces identical verdicts.** Running with `QWEN_MOCK=1`
-   must yield the same ASSET/ABSTAIN outcome (same root cause, same
+   must yield the same ASSERT/ABSTAIN outcome (same root cause, same
    confidence) as a real Qwen run. The mock templates in `llm.py` exist to
    guarantee this. If you add a new LLM call, add a mock fallback.
 
@@ -38,9 +38,9 @@ working on this project. Follow these rules to avoid breaking safety guarantees.
 QWEN_MOCK=1 pytest -q
 
 # Lint
-ruff check prove_or_abstain/ api/ tests/ scripts/ mcp_server.py
+pip install -r requirements-dev.txt && ruff check .
 
-# Benchmark (30 scenarios, both modes)
+# Benchmark (20 scenarios, both modes — 10 synthetic + 10 real)
 python -m prove_or_abstain.benchmark
 
 # Run the API locally

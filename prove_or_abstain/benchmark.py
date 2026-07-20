@@ -1,5 +1,6 @@
 """
-benchmark.py — 30 synthetic scenarios with known ground truth.
+benchmark.py — 20 ground-truth scenarios (10 synthetic gate edge cases + 10
+real-world public datasets).
 
 The ground truth comes from how each panel is GENERATED (a paid-only collapse
 => ASSERT segment=paid; a uniform drop => ABSTAIN systemic), never from the
@@ -13,7 +14,7 @@ Live (needs DASHSCOPE_API_KEY), and skipped cleanly without a key:
   - compare_llm_raw() : gives a raw model ONLY a text summary (no data) and
                         counts invented causes — the hallucinations the gated
                         pipeline is built to avoid.
-  - cross_model_eval(): the same 30 scenarios on qwen-plus/max/turbo, reporting
+  - cross_model_eval(): the same 20 scenarios on qwen-plus/max/turbo, reporting
                         correctness, latency, tokens and cost. Accuracy is
                         model-independent by design (the math decides), so the
                         table is really about cost/latency.
@@ -339,7 +340,7 @@ def compare_llm_raw() -> dict:
 
 
 def cross_model_eval(models=("qwen-turbo", "qwen-plus", "qwen-max")) -> dict:
-    """Run the 30 scenarios in agent mode on each model. Verdict accuracy is
+    """Run the 20 scenarios in agent mode on each model. Verdict accuracy is
     model-independent (the gates decide), so this is really a cost/latency
     comparison. Requires a live key."""
     if not _has_key():
@@ -416,7 +417,7 @@ def plot_calibration_curve(benchmark_results: list[dict]) -> str:
 def _write_results_json(graph_m: dict, agent_m: dict, live_evals: dict,
                         path: Path = Path("benchmark_results.json")) -> Path:
     """Dump this run to a committed, inspectable file — real output from
-    the deterministic 30-scenario harness, not a hand-written claim.
+    the deterministic 20-scenario harness, not a hand-written claim.
     Reproduce with: QWEN_MOCK=1 python -m prove_or_abstain.benchmark"""
     payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -433,7 +434,7 @@ def _write_results_json(graph_m: dict, agent_m: dict, live_evals: dict,
 
 
 if __name__ == "__main__":
-    # Keep the main 30-scenario table cheap/fast/mock by default (that's
+    # Keep the main 20-scenario table cheap/fast/mock by default (that's
     # the point of QWEN_MOCK=1 reproducibility) -- but only when no key was
     # given. Forcing it unconditionally would make _has_key() always False
     # below, so compare_llm_raw()/cross_model_eval() could never run even
@@ -458,7 +459,7 @@ if __name__ == "__main__":
     print(f"\nWrote {out_path} — commit it if this run should stand as recorded evidence.")
 
     # CI guarantee: exit code 1 if accuracy drops below 100% on either mode.
-    # The 30 scenarios are designed to be trivially correct for a pipeline
+    # The 20 scenarios are designed to be trivially correct for a pipeline
     # that implements the gates correctly — any regression here is real.
     if graph_m["accuracy"] < 1.0 or agent_m["accuracy"] < 1.0:
         import sys
