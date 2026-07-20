@@ -10,41 +10,48 @@ The FastAPI app itself — the thing that would run inside the container —
 was started and exercised directly (`uvicorn api.app:app`), not simulated:
 
 ```
-$ curl -s http://127.0.0.1:8030/health
+$ curl -s http://127.0.0.1:8040/health
 {"status":"ok"}
 
-$ curl -s -X POST http://127.0.0.1:8030/investigate -d '{"panel":"clean"}' -H 'content-type: application/json'
-verdict: ASSERT   root_cause: {"dimension": "segment", "segment": "paid"}
+$ curl -s -X POST http://127.0.0.1:8040/investigate -d '{"panel":"clean"}' -H 'content-type: application/json'
+verdict: ASSERT   root_cause: {'dimension': 'segment', 'segment': 'paid'}
 
-$ curl -s -X POST http://127.0.0.1:8030/investigate -d '{"panel":"diffuse"}' -H 'content-type: application/json'
+$ curl -s -X POST http://127.0.0.1:8040/investigate -d '{"panel":"diffuse"}' -H 'content-type: application/json'
 verdict: ABSTAIN
 ```
 
 Both verdict paths work, `/health` responds — the same checks the
 Dockerfile's `HEALTHCHECK` and Function Compute's readiness probe would run.
 
+The `.dockerignore` rules were also verified against `git ls-files` (which
+files would actually enter the build context via `COPY . .`): `examples/`
+(needed at runtime by `benchmark.py` and `POST /investigate/example`) is
+included; `.env`, `tests/`, `scripts/`, caches, and git metadata are
+correctly excluded — no secrets, no dev-only files leak into the image.
+
 ## What's NOT verified from this environment, and why
 
 Two steps could not be executed here, for concrete, checkable reasons —
 not skipped, blocked:
 
-1. **Building/running the actual container.** `docker build` fails in this
-   sandbox: `dockerd` cannot start (`ulimit: error setting limit: Operation
-   not permitted`) — the daemon itself isn't available, by sandbox design.
-   This also means the Dockerfile's non-root `USER appuser` step (added in
-   response to a code review flagging the image running as root) is
-   reviewed but not build-verified — step 1 below covers it too; watch for
-   permission errors if anything under `/app` needs to be writable beyond
-   what the `chown -R` already covers.
+1. **Building the actual container image.** `dockerd` *does* start in this
+   sandbox (an earlier version of this note said otherwise — that was
+   specific to a prior sandbox instance, not a permanent limitation). The
+   build gets further now: it fails pulling the `python:3.12-slim` base
+   image from Docker Hub through this environment's outbound proxy
+   (`403 Forbidden` on the registry CDN) — a network policy on *this*
+   sandbox, not a Dockerfile problem. So the Dockerfile's non-root
+   `USER appuser` step and the `HEALTHCHECK` are reviewed but not
+   build-verified; step 1 below covers that.
 2. **Pushing to Alibaba Cloud Container Registry / deploying to Function
    Compute.** No `aliyun` CLI and no Alibaba Cloud credentials exist in this
    environment. This is deliberate on my end too: actually deploying would
    create real, billable cloud resources on somebody's account — that needs
    the account owner's explicit action, not an agent doing it unasked.
 
-So: the code that would run in the container is proven to work; the
-container build and the cloud deployment itself are not, and can't be from
-here.
+So: the code that would run in the container is proven to work, and the
+`.dockerignore` file manifest is proven correct; the actual image build and
+the cloud deployment are not, and can't be from here.
 
 ## Closing the gap — run this yourself
 
