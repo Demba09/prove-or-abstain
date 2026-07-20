@@ -223,7 +223,10 @@ anything lower downgrades to RECOMMEND. Every EXECUTE is recorded in the audit t
 30 synthetic scenarios with **known ground truth derived from how each panel is
 generated** (a paid-only collapse ⇒ `ASSERT segment=paid`; a uniform drop ⇒
 `ABSTAIN`) — never from the pipeline's own output, so accuracy is not circular.
-Run it yourself, offline, in ~2 seconds:
+Run it yourself, offline, in ~2 seconds — it also writes
+[`benchmark_results.json`](benchmark_results.json), a committed, inspectable
+record of the actual run (timestamp, every scenario, every field below),
+not just a hand-written summary table:
 
 ```bash
 python -m prove_or_abstain.benchmark
@@ -600,7 +603,10 @@ docker run -p 8000:8000 -e DASHSCOPE_API_KEY=... prove-or-abstain
 ```
 
 For Alibaba Cloud: push to Container Registry, run on Function Compute (port 8000).
-`/health` serves as the probe endpoint.
+`/health` serves as the probe endpoint. **Honest status of this specific
+claim** — what's actually been run and verified vs. what's documented but
+not yet executed — is in
+[`docs/deployment_verification.md`](docs/deployment_verification.md).
 
 ## Qwen Cloud MCP Server
 

@@ -13,6 +13,8 @@ import os
 os.environ["QWEN_MOCK"] = "1"   # before any import that instantiates the LLM client
 os.environ.setdefault("PROBATIO_DB", ":memory:")   # never touch disk in tests
 
+import json
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -820,6 +822,19 @@ def test_benchmark_high_accuracy_offline():
         assert m["accuracy"] >= 0.9, [r for r in m["records"] if not r["correct"]]
         assert m["false_abstain_rate"] == 0.0     # never miss a real cause
         assert all("confidence" in r for r in m["records"])  # feeds calibration
+
+
+def test_benchmark_writes_inspectable_json(tmp_path):
+    from prove_or_abstain.benchmark import _write_results_json, run_benchmark
+    graph_m = run_benchmark("graph", verbose=False)
+    agent_m = run_benchmark("agent", verbose=False)
+    live_evals = {"skipped": "needs DASHSCOPE_API_KEY (and QWEN_MOCK unset)"}
+    out = _write_results_json(graph_m, agent_m, live_evals, path=tmp_path / "benchmark_results.json")
+    assert out.exists()
+    payload = json.loads(out.read_text())
+    assert payload["graph"]["n"] == 30 and payload["agent"]["n"] == 30
+    assert payload["live_evals"] == live_evals
+    assert "generated_at" in payload
 
 
 # ----------------------------------------------------- autonomous monitor

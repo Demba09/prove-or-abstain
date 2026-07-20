@@ -22,9 +22,12 @@ CLI: python -m prove_or_abstain.benchmark
 """
 from __future__ import annotations
 
+import json
 import os
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 
 import pandas as pd
 
@@ -333,6 +336,25 @@ def cross_model_eval(models=("qwen-turbo", "qwen-plus", "qwen-max")) -> dict:
     return {"models": rows}
 
 
+def _write_results_json(graph_m: dict, agent_m: dict, live_evals: dict,
+                        path: Path = Path("benchmark_results.json")) -> Path:
+    """Dump this run to a committed, inspectable file — real output from
+    the deterministic 30-scenario harness, not a hand-written claim.
+    Reproduce with: QWEN_MOCK=1 python -m prove_or_abstain.benchmark"""
+    payload = {
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_by": "python -m prove_or_abstain.benchmark",
+        "note": "graph/agent are the 30 ground-truth scenarios (QWEN_MOCK=1 "
+                "unless DASHSCOPE_API_KEY is set — reproduce with the command "
+                "above). live_evals only populates with a real key.",
+        "graph": graph_m,
+        "agent": agent_m,
+        "live_evals": live_evals,
+    }
+    path.write_text(json.dumps(payload, indent=2))
+    return path
+
+
 if __name__ == "__main__":
     # Keep the main 30-scenario table cheap/fast/mock by default (that's
     # the point of QWEN_MOCK=1 reproducibility) -- but only when no key was
@@ -347,8 +369,13 @@ if __name__ == "__main__":
     print("\nagent vs graph accuracy:",
           f"{agent_m['accuracy']:.1%} / {graph_m['accuracy']:.1%}")
     if _has_key():
-        print("\nraw-LLM hallucinations:", compare_llm_raw())
-        print("\ncross-model:", cross_model_eval())
+        live_evals = {"raw_llm_hallucinations": compare_llm_raw(),
+                     "cross_model": cross_model_eval()}
+        print("\nraw-LLM hallucinations:", live_evals["raw_llm_hallucinations"])
+        print("\ncross-model:", live_evals["cross_model"])
     else:
+        live_evals = {"skipped": "needs DASHSCOPE_API_KEY (and QWEN_MOCK unset)"}
         print("\n(live evals skipped — set DASHSCOPE_API_KEY to run "
               "compare_llm_raw + cross_model_eval)")
+    out_path = _write_results_json(graph_m, agent_m, live_evals)
+    print(f"\nWrote {out_path} — commit it if this run should stand as recorded evidence.")
