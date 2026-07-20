@@ -6,6 +6,28 @@
 
 ---
 
+## Follow-up: structural pass (post-audit)
+
+The polish findings below were all fixed, but direct feedback afterward
+("the UI is still hard to follow, especially for a time-pressed hackathon
+judge") pointed at something this audit's per-pillar framing didn't
+capture on its own: **too many equal-weight entry points**. Before this
+pass, "Built-in scenarios", "Watch a source", "Ask in plain English" and
+"Advanced" all sat in the same always-open panel — four different ways to
+start, with no cue about which one to click first.
+
+Fixed by restructuring, not rewording: the scenario picker is now the
+only always-open panel ("Try it — pick a scenario", with a one-line
+ASSERT/ABSTAIN gloss right there). Watch a source, Ask, and CSV upload
+moved into a single collapsed "More" section below the result panel —
+still one click away, but no longer competing for the first click. The
+autopilot/mode toggles stay next to the scenario picker (they change what
+clicking a scenario does) but are visually de-emphasized (`opacity: .8`)
+so they read as options, not a second decision to make before the first
+one.
+
+---
+
 ## Overall Score: 23 / 24
 
 | Pillar | Score | Verdict |
@@ -189,16 +211,19 @@ When the user types in the query field, show a pre-request note: "Will route to 
 
 ## Summary
 
-| # | Finding | Pillar | Severity | Action |
-|---|---------|--------|----------|--------|
-| 1 | "orchestration" label is jargon | Copywriting | Low | Rename to "investigation mode" |
-| 2 | Watch-a-source explanation is dense | Copywriting | Low | Move to collapsible detail |
-| 3 | No loading spinner | Experience | Medium | Add CSS pulse animation on disabled buttons |
-| 4 | `alert()` for autonomous check | Experience | Medium | Replace with inline result rendering |
-| 5 | No confirmation on alert resolve | Experience | Medium | Add `confirm()` dialog |
-| 6 | Cold-start feedback is subtle | Experience | Low | Make cold-start stamp visible (not hidden) |
-| 7 | "Ask" context shown after, not before | Experience | Low | Show routing preview pre-request |
+| # | Finding | Pillar | Severity | Action | Status |
+|---|---------|--------|----------|--------|--------|
+| 1 | "orchestration" label is jargon | Copywriting | Low | Rename to "investigation mode" | ✅ done |
+| 2 | Watch-a-source explanation is dense | Copywriting | Low | Move to collapsible detail | ✅ done (one-line + `how the baseline works` details) |
+| 3 | No loading spinner | Experience | Medium | Spinner on the initiating button | ✅ done (per-button, respects `prefers-reduced-motion`) |
+| 4 | `alert()` for autonomous check | Experience | Medium | Replace with inline result rendering | ✅ done (renders into `#dash-check-result`) |
+| 5 | No confirmation on alert resolve | Experience | Medium | Confirmation before resolve | ✅ done — two-step inline `confirm?` (not a native `confirm()`, which would repeat the very break-of-visual-language finding #4 called out) |
+| 6 | Cold-start feedback is subtle | Experience | Low | Make cold-start state visible | ✅ done — distinct `SEEDED ✓` status pill, deliberately NOT the big verdict stamp (that earlier read as a fake ASSERT/ABSTAIN) |
+| 7 | "Ask" context shown after, not before | Experience | Low | Show routing preview pre-request | ⚠️ partial — the query label already names the active target ("Asking about the clean scenario / watched source X") before the request; the actual panel Qwen routes to is decided server-side, so a true pre-request preview would mean guessing the route client-side. Left as the honest context label rather than a speculative preview. |
+
+All 6 actioned findings verified in a real browser (Playwright): no console
+errors, seeded pill renders, inline autonomous-check result, two-step resolve.
 
 ---
 
-**Bottom line**: This is an exceptionally well-crafted single-file frontend. No external dependencies, complete dark mode, clean typography, and solid accessibility. The 3-point gap from 24/24 comes from missing UX polish (spinners, confirmation dialogs, progressive feedback on async states) — not structural issues. The remaining fixes are ~30 lines of code changes.
+**Bottom line**: This is an exceptionally well-crafted single-file frontend. No external dependencies, complete dark mode, clean typography, and solid accessibility. The polish gap the audit found (spinners, confirmation, progressive feedback on async states) is now closed — with two deliberate deviations from the literal recommendation (#5 inline instead of native `confirm()`, #6 a status pill instead of reviving the verdict stamp) explained above.
