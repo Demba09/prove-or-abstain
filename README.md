@@ -325,7 +325,7 @@ DASHSCOPE_API_KEY=sk-... python -m prove_or_abstain.benchmark
 ## Tested against real data, not just planted scenarios
 
 Every scenario above is synthetic by necessity — ground truth has to be
-known in advance to grade accuracy. As an external sanity check, three
+known in advance to grade accuracy. As an external sanity check, four
 public, real (not invented) datasets go through the same pipeline,
 committed in `examples/` and pinned by tests so CI catches any drift:
 
@@ -368,15 +368,34 @@ committed in `examples/` and pinned by tests so CI catches any drift:
   sent through `POST /sources/{id}/observe` ("Watch a source", below) so it
   has to go through `map_schema()` for real. See point 2 just below for what
   that actually proves.
+- **`examples/real_taxis_weekday.csv` / `_weekend.csv`** — [seaborn-data's
+  `taxis.csv`](https://github.com/mwaskom/seaborn-data) (NYC TLC trip
+  records), restricted to credit-card fares (cash tips aren't reliably
+  recorded in this data — a methodology choice, not a cherry-picked split)
+  and aggregated into the long-panel shape. Weekday → weekend, the tip rate
+  moves +3.0pp overall; `pickup_borough` alone **ABSTAINs** (concentration
+  0.48, p=0.081), but `color` localizes cleanly: green-cab (outer-borough)
+  trips jump 48.8% → 64.4% while yellow cabs — 95% of the volume, already
+  near-ceiling at ~95% — barely move. Real, un-planted, and confidence
+  stays low enough (0.30) to correctly stay a `RECOMMEND`. This is the
+  dataset behind the demo page's one-click **"real: taxi tips"** tile
+  (`POST /investigate/example`, `{"name": "taxis"}`) — not yet folded into
+  the 20-scenario benchmark table above.
+  ```bash
+  curl -X POST localhost:8000/investigate/example -F name=taxis
+  ```
 
-Two honest limits on what these three prove:
+Two honest limits on what these four prove (three of them; taxis is the
+one exception — see its own caveat above, it isn't in the scored benchmark):
 
 1. **Now included in the benchmark but with known expectations.** The 10 synthetic
    scenarios have ground truth written *before* any run, derived from how
-   the panel was built. For the three real datasets, the expected outcome was
-   verified by running the pipeline against independently known facts (Titanic's
-   documented "women and children first" effect, the college majors' gender gap,
-   airline passenger seasonality) — not circular, but not pre-registered either.
+   the panel was built. For the three benchmark-scored real datasets, the expected
+   outcome was verified by running the pipeline against independently known facts
+   (Titanic's documented "women and children first" effect, the college majors'
+   gender gap, airline passenger seasonality) — not circular, but not pre-registered
+   either. Taxis was verified the same way (run first, checked against the
+   ceiling-effect explanation above) but isn't yet one of the scored 20.
 2. **Only the college-majors `_raw.csv` variant tests Qwen's judgment.**
    Flights and Titanic arrive already in the clean `metric`/`n`/`c` shape, so
    `map_schema()` never runs — they exercise the math against real noise, not
@@ -519,7 +538,7 @@ POST /investigate/query    natural language: { "query": "why did conversion drop
                            or, about a watched source instead: { "query": "...", "source_id": "my-dashboard-metric" }
 POST /investigate/suggest  setup helper: upload a sample CSV, get back sum-vs-rate metric classification
 POST /investigate/upload   CSV upload (multipart: baseline + current)
-POST /investigate/example  one-click real-world proof: { "name": "titanic" } — same pipeline, a real (not planted) dataset
+POST /investigate/example  one-click real-world proof: { "name": "titanic" | "taxis" } — same pipeline, a real (not planted) dataset
 POST /investigate/sql      live database: { "dsn": "...", "baseline_query": "...", "current_query": "..." }
 POST /investigate/sheets   live Google Sheets: { "baseline_url": "...", "current_url": "..." }
 POST /investigate/series   time series (multipart: series.csv + window)

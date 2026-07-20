@@ -1,0 +1,9 @@
+metric,pickup_borough,color,n,c
+tipped,Bronx,green,15,2
+tipped,Bronx,yellow,1,0
+tipped,Brooklyn,green,65,38
+tipped,Brooklyn,yellow,16,11
+tipped,Manhattan,green,51,46
+tipped,Manhattan,yellow,1052,1019
+tipped,Queens,green,43,26
+tipped,Queens,yellow,60,57

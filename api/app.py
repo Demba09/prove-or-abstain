@@ -113,6 +113,12 @@ _EXAMPLES = {
         "sum_metrics": "",
         "blurb": "real Titanic passengers, not planted → ASSERT sex=female",
     },
+    "taxis": {
+        "baseline": "real_taxis_weekday.csv",
+        "current": "real_taxis_weekend.csv",
+        "sum_metrics": "",
+        "blurb": "real NYC taxi tips, not planted → ASSERT color=green",
+    },
 }
 _REQUIRED = {"metric", "n", "c"}             # mandatory long-panel columns
 _RESERVED = _REQUIRED | {"period"}           # non-dimension columns
