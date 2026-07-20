@@ -317,6 +317,10 @@ footer a { color: var(--accent-strong); }
         <label class="field-label" for="observation">One observation — same long-panel shape, or a raw source</label>
         <input type="file" id="observation" accept=".csv">
       </div>
+      <div class="field">
+        <label class="field-label" for="sumMetrics">Sum metrics (comma-separated, e.g. revenue)</label>
+        <input type="text" id="sumMetrics" placeholder="— only if c > n">
+      </div>
       <button class="secondary" type="button" id="observeBtn">send observation</button>
     </div>
 
@@ -506,6 +510,8 @@ function runObserve() {
   fd.append('panel', obs);
   fd.append('autopilot', $('autopilot').checked);
   fd.append('mode', orchestrationMode);
+  const sumMetrics = $('sumMetrics').value.trim();
+  if (sumMetrics) fd.append('sum_metrics', sumMetrics);
   call(`/sources/${encodeURIComponent(sourceId)}/observe`, {method: 'POST', body: fd});
 }
 

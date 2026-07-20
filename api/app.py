@@ -480,7 +480,8 @@ def _read_raw_csv(upload: UploadFile, name: str) -> pd.DataFrame:
         raise HTTPException(400, f"{name}: not a readable CSV ({exc})")
 
 
-def _apply_schema_mapping(df: pd.DataFrame, name: str) -> pd.DataFrame:
+def _apply_schema_mapping(df: pd.DataFrame, name: str,
+                           sum_metrics_hint: str = "") -> pd.DataFrame:
     """Reshape a raw upload onto [metric, dims..., n, c] via llm.map_schema()
     — Qwen's decision is used directly (no human confirmation gate) but is
     always run through the same _validate_panel every other data source
@@ -491,10 +492,51 @@ def _apply_schema_mapping(df: pd.DataFrame, name: str) -> pd.DataFrame:
     mapping = get_client().map_schema(columns, sample_rows)
     metric_col, n_col, c_col = (mapping.get("metric_column"),
                                 mapping.get("n_column"), mapping.get("c_column"))
-    if not (metric_col and n_col and c_col):
+
+    # If Qwen couldn't identify a value column but we have a sum_metrics hint,
+    # use it: the hint names the metric (e.g. "weekly_sales"), and the column
+    # holding that value is likely the c column.
+    if not c_col and sum_metrics_hint:
+        hints = [h.strip().lower() for h in sum_metrics_hint.split(",")]
+        for col in columns:
+            if col.lower() in hints:
+                c_col = col
+                break
+
+    # If Qwen identified the metric name column AND the value column as the
+    # SAME column (common for single-metric datasets: the value column name
+    # IS the metric name), we can't rename it twice. Keep it as "c" and add
+    # a constant "metric" column with the metric name instead.
+    if metric_col and c_col and metric_col == c_col:
+        hints = [h.strip() for h in sum_metrics_hint.split(",") if h.strip()]
+        metric_name = hints[0] if hints else metric_col
+        df = df.copy()
+        df["metric"] = metric_name   # constant metric name for all rows
+        metric_col = "metric"
+
+    # If Qwen found a value column (c) but no metric name column, the metric
+    # is implicit — create a constant "metric" column using the hint (or
+    # the c column's name). e.g. Titanic: Survived IS the metric.
+    if c_col and not metric_col:
+        hints = [h.strip() for h in sum_metrics_hint.split(",") if h.strip()]
+        metric_name = hints[0] if hints else c_col
+        df = df.copy()
+        df["metric"] = metric_name   # constant metric name for all rows
+        metric_col = "metric"
+
+    # If no n column found, each row IS one observation — n=1.
+    if not n_col:
+        df = df.copy()
+        df["n"] = 1
+        n_col = "n"
+
+    if not c_col:
         raise HTTPException(
-            400, f"{name}: could not identify metric/n/c columns among "
-                f"{columns} (mapping: {mapping})")
+            400, f"{name}: could not identify a value column (c) among "
+                f"{columns}. The data needs a count column (e.g. Total, "
+                f"Employed, Weekly_Sales) — Qwen couldn't map any of "
+                f"{columns} as the numerator. (mapping: {mapping})")
+
     renamed = df.rename(columns={metric_col: "metric", n_col: "n", c_col: "c"})
     return _validate_panel(renamed, name)
 
@@ -516,7 +558,7 @@ def observe_source(source_id: str,
     "compare these two periods" analysis with no ingestion history."""
     raw = _read_raw_csv(panel, "panel")
     if _REQUIRED - set(raw.columns):
-        df = _apply_schema_mapping(raw, "panel")
+        df = _apply_schema_mapping(raw, "panel", sum_metrics_hint=sum_metrics)
     else:
         df = _validate_panel(raw, "panel")
 

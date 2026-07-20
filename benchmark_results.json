@@ -1,19 +1,126 @@
 {
-  "generated_at": "2026-07-20T00:55:25.823550+00:00",
+  "generated_at": "2026-07-20T07:35:02.054230+00:00",
   "generated_by": "python -m prove_or_abstain.benchmark",
   "note": "graph/agent are the 30 ground-truth scenarios (QWEN_MOCK=1 unless DASHSCOPE_API_KEY is set \u2014 reproduce with the command above). live_evals only populates with a real key.",
   "graph": {
     "mode": "graph",
-    "n": 30,
+    "n": 20,
     "accuracy": 1.0,
     "precision": 1.0,
     "recall": 1.0,
     "false_assert_rate": 0.0,
     "false_abstain_rate": 0.0,
+    "ece": 0.4062,
+    "calibration": {
+      "n": 9,
+      "ece": 0.4062,
+      "buckets": [
+        {
+          "range": [
+            0.0,
+            0.1
+          ],
+          "mid": 0.05,
+          "count": 2,
+          "accuracy": 1.0,
+          "avg_confidence": 0.053
+        },
+        {
+          "range": [
+            0.1,
+            0.2
+          ],
+          "mid": 0.15,
+          "count": 0,
+          "accuracy": null,
+          "avg_confidence": null
+        },
+        {
+          "range": [
+            0.2,
+            0.3
+          ],
+          "mid": 0.25,
+          "count": 0,
+          "accuracy": null,
+          "avg_confidence": null
+        },
+        {
+          "range": [
+            0.3,
+            0.4
+          ],
+          "mid": 0.35,
+          "count": 1,
+          "accuracy": 1.0,
+          "avg_confidence": 0.31
+        },
+        {
+          "range": [
+            0.4,
+            0.5
+          ],
+          "mid": 0.45,
+          "count": 1,
+          "accuracy": 1.0,
+          "avg_confidence": 0.409
+        },
+        {
+          "range": [
+            0.5,
+            0.6
+          ],
+          "mid": 0.55,
+          "count": 1,
+          "accuracy": 1.0,
+          "avg_confidence": 0.518
+        },
+        {
+          "range": [
+            0.6,
+            0.7
+          ],
+          "mid": 0.65,
+          "count": 0,
+          "accuracy": null,
+          "avg_confidence": null
+        },
+        {
+          "range": [
+            0.7,
+            0.8
+          ],
+          "mid": 0.75,
+          "count": 0,
+          "accuracy": null,
+          "avg_confidence": null
+        },
+        {
+          "range": [
+            0.8,
+            0.9
+          ],
+          "mid": 0.85,
+          "count": 0,
+          "accuracy": null,
+          "avg_confidence": null
+        },
+        {
+          "range": [
+            0.9,
+            1.0
+          ],
+          "mid": 0.95,
+          "count": 4,
+          "accuracy": 1.0,
+          "avg_confidence": 1.0
+        }
+      ]
+    },
     "records": [
       {
-        "name": "seg_paid_hard",
-        "category": "clean_segment",
+        "name": "seg_paid",
+        "category": "clean",
         "expected": "ASSERT",
         "got": "ASSERT",
         "expected_cause": "segment=paid",
@@ -22,48 +129,8 @@
         "correct": true
       },
       {
-        "name": "seg_paid_soft",
-        "category": "clean_segment",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "segment=paid",
-        "got_cause": "segment=paid",
-        "confidence": 0.599,
-        "correct": true
-      },
-      {
-        "name": "seg_organic",
-        "category": "clean_segment",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "segment=organic",
-        "got_cause": "segment=organic",
-        "confidence": 1.0,
-        "correct": true
-      },
-      {
-        "name": "seg_referral",
-        "category": "clean_segment",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "segment=referral",
-        "got_cause": "segment=referral",
-        "confidence": 0.52,
-        "correct": true
-      },
-      {
-        "name": "seg_email",
-        "category": "clean_segment",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "segment=email",
-        "got_cause": "segment=email",
-        "confidence": 0.82,
-        "correct": true
-      },
-      {
-        "name": "dev_mobile_hard",
-        "category": "clean_device",
+        "name": "dev_mobile",
+        "category": "clean",
         "expected": "ASSERT",
         "got": "ASSERT",
         "expected_cause": "device=mobile",
@@ -72,48 +139,8 @@
         "correct": true
       },
       {
-        "name": "dev_mobile_soft",
-        "category": "clean_device",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "device=mobile",
-        "got_cause": "device=mobile",
-        "confidence": 0.897,
-        "correct": true
-      },
-      {
-        "name": "dev_desktop_hard",
-        "category": "clean_device",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "device=desktop",
-        "got_cause": "device=desktop",
-        "confidence": 1.0,
-        "correct": true
-      },
-      {
-        "name": "dev_desktop_soft",
-        "category": "clean_device",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "device=desktop",
-        "got_cause": "device=desktop",
-        "confidence": 1.0,
-        "correct": true
-      },
-      {
-        "name": "dev_mobile_mid",
-        "category": "clean_device",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "device=mobile",
-        "got_cause": "device=mobile",
-        "confidence": 1.0,
-        "correct": true
-      },
-      {
-        "name": "split_paid_organic",
-        "category": "clean_abstain",
+        "name": "no_single",
+        "category": "abstain",
         "expected": "ABSTAIN",
         "got": "ABSTAIN",
         "expected_cause": null,
@@ -122,27 +149,7 @@
         "correct": true
       },
       {
-        "name": "split_paid_referral",
-        "category": "clean_abstain",
-        "expected": "ABSTAIN",
-        "got": "ABSTAIN",
-        "expected_cause": null,
-        "got_cause": null,
-        "confidence": 0.0,
-        "correct": true
-      },
-      {
-        "name": "split_three",
-        "category": "clean_abstain",
-        "expected": "ABSTAIN",
-        "got": "ABSTAIN",
-        "expected_cause": null,
-        "got_cause": null,
-        "confidence": 0.0,
-        "correct": true
-      },
-      {
-        "name": "diffuse_0",
+        "name": "diffuse",
         "category": "diffuse",
         "expected": "ABSTAIN",
         "got": "ABSTAIN",
@@ -152,47 +159,7 @@
         "correct": true
       },
       {
-        "name": "diffuse_1",
-        "category": "diffuse",
-        "expected": "ABSTAIN",
-        "got": "ABSTAIN",
-        "expected_cause": null,
-        "got_cause": null,
-        "confidence": 0.0,
-        "correct": true
-      },
-      {
-        "name": "diffuse_2",
-        "category": "diffuse",
-        "expected": "ABSTAIN",
-        "got": "ABSTAIN",
-        "expected_cause": null,
-        "got_cause": null,
-        "confidence": 0.0,
-        "correct": true
-      },
-      {
-        "name": "diffuse_3",
-        "category": "diffuse",
-        "expected": "ABSTAIN",
-        "got": "ABSTAIN",
-        "expected_cause": null,
-        "got_cause": null,
-        "confidence": 0.0,
-        "correct": true
-      },
-      {
-        "name": "diffuse_4",
-        "category": "diffuse",
-        "expected": "ABSTAIN",
-        "got": "ABSTAIN",
-        "expected_cause": null,
-        "got_cause": null,
-        "confidence": 0.0,
-        "correct": true
-      },
-      {
-        "name": "mixshift_a",
+        "name": "mixshift",
         "category": "mixshift",
         "expected": "ABSTAIN",
         "got": "ABSTAIN",
@@ -202,27 +169,7 @@
         "correct": true
       },
       {
-        "name": "mixshift_b",
-        "category": "mixshift",
-        "expected": "ABSTAIN",
-        "got": "ABSTAIN",
-        "expected_cause": null,
-        "got_cause": null,
-        "confidence": 0.0,
-        "correct": true
-      },
-      {
-        "name": "mixshift_c",
-        "category": "mixshift",
-        "expected": "ABSTAIN",
-        "got": "ABSTAIN",
-        "expected_cause": null,
-        "got_cause": null,
-        "confidence": 0.0,
-        "correct": true
-      },
-      {
-        "name": "deep_paid_mobile",
+        "name": "deep",
         "category": "deep",
         "expected": "ASSERT",
         "got": "ASSERT",
@@ -232,27 +179,7 @@
         "correct": true
       },
       {
-        "name": "deep_organic_mobile",
-        "category": "deep",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "device=mobile",
-        "got_cause": "device=mobile",
-        "confidence": 0.783,
-        "correct": true
-      },
-      {
-        "name": "deep_paid_desktop",
-        "category": "deep",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "device=desktop",
-        "got_cause": "device=desktop",
-        "confidence": 0.409,
-        "correct": true
-      },
-      {
-        "name": "edge_revenue_sum",
+        "name": "single_dim",
         "category": "edge",
         "expected": "ASSERT",
         "got": "ASSERT",
@@ -262,7 +189,17 @@
         "correct": true
       },
       {
-        "name": "edge_small_sample",
+        "name": "revenue_sum",
+        "category": "edge",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=paid",
+        "got_cause": "segment=paid",
+        "confidence": 1.0,
+        "correct": true
+      },
+      {
+        "name": "tiny_sample",
         "category": "edge",
         "expected": "ABSTAIN",
         "got": "ABSTAIN",
@@ -272,17 +209,7 @@
         "correct": true
       },
       {
-        "name": "edge_single_dim",
-        "category": "edge",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "segment=paid",
-        "got_cause": "segment=paid",
-        "confidence": 1.0,
-        "correct": true
-      },
-      {
-        "name": "noisy_1",
+        "name": "noisy",
         "category": "noisy",
         "expected": "ASSERT",
         "got": "ASSERT",
@@ -292,39 +219,226 @@
         "correct": true
       },
       {
-        "name": "noisy_2",
-        "category": "noisy",
+        "name": "real_titanic",
+        "category": "real",
         "expected": "ASSERT",
         "got": "ASSERT",
-        "expected_cause": "segment=paid",
-        "got_cause": "segment=paid",
-        "confidence": 0.775,
+        "expected_cause": "sex=female",
+        "got_cause": "sex=female",
+        "confidence": 0.093,
         "correct": true
       },
       {
-        "name": "noisy_3",
-        "category": "noisy",
+        "name": "real_majors",
+        "category": "real",
         "expected": "ASSERT",
         "got": "ASSERT",
-        "expected_cause": "segment=organic",
-        "got_cause": "segment=organic",
-        "confidence": 0.831,
+        "expected_cause": "gender_majority=majority_women",
+        "got_cause": "gender_majority=majority_women",
+        "confidence": 0.014,
+        "correct": true
+      },
+      {
+        "name": "real_flights",
+        "category": "real",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "real_tips",
+        "category": "real",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "real_mpg",
+        "category": "real",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "real_penguins",
+        "category": "real",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "species=Adelie",
+        "got_cause": "species=Adelie",
+        "confidence": 0.31,
+        "correct": true
+      },
+      {
+        "name": "real_diamonds",
+        "category": "real",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "real_gapminder",
+        "category": "real",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "real_cars",
+        "category": "real",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "real_iris",
+        "category": "real",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
         "correct": true
       }
     ]
   },
   "agent": {
     "mode": "agent",
-    "n": 30,
+    "n": 20,
     "accuracy": 1.0,
     "precision": 1.0,
     "recall": 1.0,
     "false_assert_rate": 0.0,
     "false_abstain_rate": 0.0,
+    "ece": 0.4062,
+    "calibration": {
+      "n": 9,
+      "ece": 0.4062,
+      "buckets": [
+        {
+          "range": [
+            0.0,
+            0.1
+          ],
+          "mid": 0.05,
+          "count": 2,
+          "accuracy": 1.0,
+          "avg_confidence": 0.053
+        },
+        {
+          "range": [
+            0.1,
+            0.2
+          ],
+          "mid": 0.15,
+          "count": 0,
+          "accuracy": null,
+          "avg_confidence": null
+        },
+        {
+          "range": [
+            0.2,
+            0.3
+          ],
+          "mid": 0.25,
+          "count": 0,
+          "accuracy": null,
+          "avg_confidence": null
+        },
+        {
+          "range": [
+            0.3,
+            0.4
+          ],
+          "mid": 0.35,
+          "count": 1,
+          "accuracy": 1.0,
+          "avg_confidence": 0.31
+        },
+        {
+          "range": [
+            0.4,
+            0.5
+          ],
+          "mid": 0.45,
+          "count": 1,
+          "accuracy": 1.0,
+          "avg_confidence": 0.409
+        },
+        {
+          "range": [
+            0.5,
+            0.6
+          ],
+          "mid": 0.55,
+          "count": 1,
+          "accuracy": 1.0,
+          "avg_confidence": 0.518
+        },
+        {
+          "range": [
+            0.6,
+            0.7
+          ],
+          "mid": 0.65,
+          "count": 0,
+          "accuracy": null,
+          "avg_confidence": null
+        },
+        {
+          "range": [
+            0.7,
+            0.8
+          ],
+          "mid": 0.75,
+          "count": 0,
+          "accuracy": null,
+          "avg_confidence": null
+        },
+        {
+          "range": [
+            0.8,
+            0.9
+          ],
+          "mid": 0.85,
+          "count": 0,
+          "accuracy": null,
+          "avg_confidence": null
+        },
+        {
+          "range": [
+            0.9,
+            1.0
+          ],
+          "mid": 0.95,
+          "count": 4,
+          "accuracy": 1.0,
+          "avg_confidence": 1.0
+        }
+      ]
+    },
     "records": [
       {
-        "name": "seg_paid_hard",
-        "category": "clean_segment",
+        "name": "seg_paid",
+        "category": "clean",
         "expected": "ASSERT",
         "got": "ASSERT",
         "expected_cause": "segment=paid",
@@ -333,48 +447,8 @@
         "correct": true
       },
       {
-        "name": "seg_paid_soft",
-        "category": "clean_segment",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "segment=paid",
-        "got_cause": "segment=paid",
-        "confidence": 0.599,
-        "correct": true
-      },
-      {
-        "name": "seg_organic",
-        "category": "clean_segment",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "segment=organic",
-        "got_cause": "segment=organic",
-        "confidence": 1.0,
-        "correct": true
-      },
-      {
-        "name": "seg_referral",
-        "category": "clean_segment",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "segment=referral",
-        "got_cause": "segment=referral",
-        "confidence": 0.52,
-        "correct": true
-      },
-      {
-        "name": "seg_email",
-        "category": "clean_segment",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "segment=email",
-        "got_cause": "segment=email",
-        "confidence": 0.82,
-        "correct": true
-      },
-      {
-        "name": "dev_mobile_hard",
-        "category": "clean_device",
+        "name": "dev_mobile",
+        "category": "clean",
         "expected": "ASSERT",
         "got": "ASSERT",
         "expected_cause": "device=mobile",
@@ -383,48 +457,8 @@
         "correct": true
       },
       {
-        "name": "dev_mobile_soft",
-        "category": "clean_device",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "device=mobile",
-        "got_cause": "device=mobile",
-        "confidence": 0.897,
-        "correct": true
-      },
-      {
-        "name": "dev_desktop_hard",
-        "category": "clean_device",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "device=desktop",
-        "got_cause": "device=desktop",
-        "confidence": 1.0,
-        "correct": true
-      },
-      {
-        "name": "dev_desktop_soft",
-        "category": "clean_device",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "device=desktop",
-        "got_cause": "device=desktop",
-        "confidence": 1.0,
-        "correct": true
-      },
-      {
-        "name": "dev_mobile_mid",
-        "category": "clean_device",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "device=mobile",
-        "got_cause": "device=mobile",
-        "confidence": 1.0,
-        "correct": true
-      },
-      {
-        "name": "split_paid_organic",
-        "category": "clean_abstain",
+        "name": "no_single",
+        "category": "abstain",
         "expected": "ABSTAIN",
         "got": "ABSTAIN",
         "expected_cause": null,
@@ -433,27 +467,7 @@
         "correct": true
       },
       {
-        "name": "split_paid_referral",
-        "category": "clean_abstain",
-        "expected": "ABSTAIN",
-        "got": "ABSTAIN",
-        "expected_cause": null,
-        "got_cause": null,
-        "confidence": 0.0,
-        "correct": true
-      },
-      {
-        "name": "split_three",
-        "category": "clean_abstain",
-        "expected": "ABSTAIN",
-        "got": "ABSTAIN",
-        "expected_cause": null,
-        "got_cause": null,
-        "confidence": 0.0,
-        "correct": true
-      },
-      {
-        "name": "diffuse_0",
+        "name": "diffuse",
         "category": "diffuse",
         "expected": "ABSTAIN",
         "got": "ABSTAIN",
@@ -463,47 +477,7 @@
         "correct": true
       },
       {
-        "name": "diffuse_1",
-        "category": "diffuse",
-        "expected": "ABSTAIN",
-        "got": "ABSTAIN",
-        "expected_cause": null,
-        "got_cause": null,
-        "confidence": 0.0,
-        "correct": true
-      },
-      {
-        "name": "diffuse_2",
-        "category": "diffuse",
-        "expected": "ABSTAIN",
-        "got": "ABSTAIN",
-        "expected_cause": null,
-        "got_cause": null,
-        "confidence": 0.0,
-        "correct": true
-      },
-      {
-        "name": "diffuse_3",
-        "category": "diffuse",
-        "expected": "ABSTAIN",
-        "got": "ABSTAIN",
-        "expected_cause": null,
-        "got_cause": null,
-        "confidence": 0.0,
-        "correct": true
-      },
-      {
-        "name": "diffuse_4",
-        "category": "diffuse",
-        "expected": "ABSTAIN",
-        "got": "ABSTAIN",
-        "expected_cause": null,
-        "got_cause": null,
-        "confidence": 0.0,
-        "correct": true
-      },
-      {
-        "name": "mixshift_a",
+        "name": "mixshift",
         "category": "mixshift",
         "expected": "ABSTAIN",
         "got": "ABSTAIN",
@@ -513,27 +487,7 @@
         "correct": true
       },
       {
-        "name": "mixshift_b",
-        "category": "mixshift",
-        "expected": "ABSTAIN",
-        "got": "ABSTAIN",
-        "expected_cause": null,
-        "got_cause": null,
-        "confidence": 0.0,
-        "correct": true
-      },
-      {
-        "name": "mixshift_c",
-        "category": "mixshift",
-        "expected": "ABSTAIN",
-        "got": "ABSTAIN",
-        "expected_cause": null,
-        "got_cause": null,
-        "confidence": 0.0,
-        "correct": true
-      },
-      {
-        "name": "deep_paid_mobile",
+        "name": "deep",
         "category": "deep",
         "expected": "ASSERT",
         "got": "ASSERT",
@@ -543,27 +497,7 @@
         "correct": true
       },
       {
-        "name": "deep_organic_mobile",
-        "category": "deep",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "device=mobile",
-        "got_cause": "device=mobile",
-        "confidence": 0.783,
-        "correct": true
-      },
-      {
-        "name": "deep_paid_desktop",
-        "category": "deep",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "device=desktop",
-        "got_cause": "device=desktop",
-        "confidence": 0.409,
-        "correct": true
-      },
-      {
-        "name": "edge_revenue_sum",
+        "name": "single_dim",
         "category": "edge",
         "expected": "ASSERT",
         "got": "ASSERT",
@@ -573,7 +507,17 @@
         "correct": true
       },
       {
-        "name": "edge_small_sample",
+        "name": "revenue_sum",
+        "category": "edge",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=paid",
+        "got_cause": "segment=paid",
+        "confidence": 1.0,
+        "correct": true
+      },
+      {
+        "name": "tiny_sample",
         "category": "edge",
         "expected": "ABSTAIN",
         "got": "ABSTAIN",
@@ -583,17 +527,7 @@
         "correct": true
       },
       {
-        "name": "edge_single_dim",
-        "category": "edge",
-        "expected": "ASSERT",
-        "got": "ASSERT",
-        "expected_cause": "segment=paid",
-        "got_cause": "segment=paid",
-        "confidence": 1.0,
-        "correct": true
-      },
-      {
-        "name": "noisy_1",
+        "name": "noisy",
         "category": "noisy",
         "expected": "ASSERT",
         "got": "ASSERT",
@@ -603,23 +537,103 @@
         "correct": true
       },
       {
-        "name": "noisy_2",
-        "category": "noisy",
+        "name": "real_titanic",
+        "category": "real",
         "expected": "ASSERT",
         "got": "ASSERT",
-        "expected_cause": "segment=paid",
-        "got_cause": "segment=paid",
-        "confidence": 0.775,
+        "expected_cause": "sex=female",
+        "got_cause": "sex=female",
+        "confidence": 0.093,
         "correct": true
       },
       {
-        "name": "noisy_3",
-        "category": "noisy",
+        "name": "real_majors",
+        "category": "real",
         "expected": "ASSERT",
         "got": "ASSERT",
-        "expected_cause": "segment=organic",
-        "got_cause": "segment=organic",
-        "confidence": 0.831,
+        "expected_cause": "gender_majority=majority_women",
+        "got_cause": "gender_majority=majority_women",
+        "confidence": 0.014,
+        "correct": true
+      },
+      {
+        "name": "real_flights",
+        "category": "real",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "real_tips",
+        "category": "real",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "real_mpg",
+        "category": "real",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "real_penguins",
+        "category": "real",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "species=Adelie",
+        "got_cause": "species=Adelie",
+        "confidence": 0.31,
+        "correct": true
+      },
+      {
+        "name": "real_diamonds",
+        "category": "real",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "real_gapminder",
+        "category": "real",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "real_cars",
+        "category": "real",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "real_iris",
+        "category": "real",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
         "correct": true
       }
     ]
