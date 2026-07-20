@@ -95,8 +95,7 @@ red with named reasons (diffuse cause, not significant), ESCALATE action.
 
 ## Beat 5 — close (1:45–2:00)
 
-**Show:** the architecture diagram (`docs/architecture.svg`) or scroll the
-page footer into view.
+**Show:** the architecture diagram (`docs/architecture.svg`).
 
 **Narration:**
 
