@@ -123,7 +123,7 @@ Cost: 4 481 tokens = $0.004                 4/10 of a cent per investigation
 ```bash
 git clone https://github.com/Demba09/prove-or-abstain
 cd prove-or-abstain
-pip install -r requirements.txt
+pip install -e .
 QWEN_MOCK=1 uvicorn api.app:app --reload
 # Open http://localhost:8000
 ```
@@ -459,7 +459,8 @@ Requires Python 3.12+.
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .                        # the package, with all runtime deps
+pip install -r requirements-dev.txt     # pytest + ruff (optional)
 QWEN_MOCK=1 pytest -q
 QWEN_MOCK=1 uvicorn api.app:app --reload
 ```
