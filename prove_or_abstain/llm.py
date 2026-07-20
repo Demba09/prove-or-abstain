@@ -688,7 +688,26 @@ def template_map_schema(columns: list[str], sample_rows: list[dict]) -> dict:
         and not any(h in c.lower() for h in _NON_VALUE_NAME_HINTS)
         and _is_numeric_column(c)
     ]
-    value_col = numeric_candidates[0] if len(numeric_candidates) == 1 else None
+    # When exactly one numeric column remains, it's the unambiguous value to
+    # sum. When there are several (e.g. Weekly_Sales alongside Temperature,
+    # Fuel_Price, CPI), prefer the one whose name hints at a value/sum/total
+    # rather than a covariate. Only applies when NO n or c was found by
+    # keyword — if the data has Total/Employed kind of columns, the caller
+    # needs Qwen's judgment, not this heuristic.
+    if not n_col and not c_col:
+        if len(numeric_candidates) == 1:
+            value_col = numeric_candidates[0]
+        elif len(numeric_candidates) > 1:
+            _VALUE_HINTS = ("sales", "revenue", "amount", "price", "value",
+                           "sum", "total", "cost", "spend", "income", "profit",
+                           "refund", "gmv", "volume")
+            value_hits = [c for c in numeric_candidates
+                         if any(h in c.lower() for h in _VALUE_HINTS)]
+            value_col = value_hits[0] if len(value_hits) == 1 else None
+        else:
+            value_col = None
+    else:
+        value_col = None
 
     if value_col:
         dim_cols = [c for c in columns
