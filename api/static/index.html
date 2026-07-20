@@ -81,6 +81,13 @@ legend { padding: 0; margin: 0 0 10px; font-size: 11px; letter-spacing: .08em; t
 .tab .name { font-weight: 600; display: block; }
 .tab .hint { display: block; font-size: 11.5px; color: inherit; opacity: .8; margin-top: 1px; }
 .tab[aria-pressed="true"] .hint { opacity: .9; }
+.tab.real { border-color: var(--assert); }
+.tab.real .badge {
+  font-size: 9.5px; font-weight: 700; letter-spacing: .04em; color: var(--assert);
+  background: var(--assert-bg); border-radius: 999px; padding: 1px 6px; margin-left: 4px;
+}
+.tab.real[aria-pressed="true"] { background: var(--assert); border-color: var(--assert); }
+.tab.real[aria-pressed="true"] .badge { color: var(--assert); background: #fff; }
 
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 14px; }
 .switch { display: inline-flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--muted); cursor: pointer; user-select: none; }
@@ -301,6 +308,7 @@ footer a { color: var(--accent-strong); }
         <button class="tab" type="button" data-panel="diffuse" aria-pressed="false"><span class="name">diffuse</span><span class="hint">uniform drop &rarr; ABSTAIN</span></button>
         <button class="tab" type="button" data-panel="mixshift" aria-pressed="false"><span class="name">mixshift</span><span class="hint">mix and rates entangled &rarr; ABSTAIN</span></button>
         <button class="tab" type="button" data-panel="deep" aria-pressed="false"><span class="name">deep</span><span class="hint">one cell collapses &rarr; ASSERT, then drills down</span></button>
+        <button class="tab real" type="button" data-panel="example:titanic" aria-pressed="false"><span class="name">real data <span class="badge">REAL</span></span><span class="hint">Titanic passengers, not planted &rarr; ASSERT sex=female</span></button>
       </div>
     </fieldset>
     <div class="row">
@@ -425,6 +433,9 @@ footer a { color: var(--accent-strong); }
       <h2>Autopilot dashboard — autonomous monitoring</h2>
       <button class="secondary" type="button" id="dash-check-btn" onclick="runAutonomousCheck()">run autonomous check</button>
     </div>
+    <p class="field-label" style="margin:-8px 0 12px;">"Autonomous checks" and "last check" only count runs of the
+      button above (or a scheduler hitting <code>/investigate/check</code>) — not the scenarios above, which only
+      show up here under "total executions" if autopilot was ON and confidence cleared 0.70.</p>
     <div class="dash-stats" id="dash-stats"></div>
     <div id="dash-alerts"></div>
     <div class="dash-empty" id="dash-empty">Loading&hellip;</div>
@@ -519,6 +530,14 @@ function runQuery() {
   });
 }
 
+function runExample(name) {
+  setActiveTab('example:' + name);
+  const fd = new FormData();
+  fd.append('name', name);
+  fd.append('autopilot', $('autopilot').checked);
+  call('/investigate/example', {method: 'POST', body: fd});
+}
+
 function runUpload() {
   const base = $('baseline').files[0], curr = $('current').files[0];
   if (!base || !curr) return fail('Select both a baseline CSV and a current CSV.');
@@ -588,7 +607,8 @@ function render(b) {
   // "ask" targets whatever just produced a real (non-cold-start) result —
   // a watched source once it has something to compare, else a scenario.
   if (b.source_id && !b.cold_start) activeContext = {type: 'source', source_id: b.source_id};
-  else if (b.panel) activeContext = {type: 'panel', panel: b.panel};
+  else if (b.panel && !b.panel.startsWith('example:')) activeContext = {type: 'panel', panel: b.panel};
+  else activeContext = null;
   updateQueryLabel();
 
   const exhibits = $('exhibits');
@@ -781,7 +801,11 @@ async function showDataset(body) {
   renderDatasetTable(rates);
 }
 
-document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => runPanel(t.dataset.panel)));
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  const p = t.dataset.panel;
+  if (p.startsWith('example:')) runExample(p.slice('example:'.length));
+  else runPanel(p);
+}));
 document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
 $('askBtn').addEventListener('click', runQuery);
 $('query').addEventListener('keydown', e => { if (e.key === 'Enter') runQuery(); });
@@ -803,10 +827,10 @@ function renderDashboard(d) {
   const lastCheck = d.last_check_at ? new Date(d.last_check_at * 1000).toLocaleTimeString() : 'never';
   const uptimeMin = Math.floor(d.uptime_seconds / 60);
   stats.innerHTML =
-    `<div class="stat"><b>${d.total_checks}</b>checks</div>
-     <div class="stat"><b>${d.total_executions}</b>executions</div>
-     <div class="stat"><b>${d.active_alerts.filter(a => !a.resolved).length}</b>active alerts</div>
-     <div class="stat"><b>${lastCheck}</b>last check</div>
+    `<div class="stat"><b>${d.total_checks}</b>autonomous checks</div>
+     <div class="stat"><b>${d.total_executions}</b>total executions</div>
+     <div class="stat"><b>${d.active_alerts.filter(a => !a.resolved).length}</b>unresolved now</div>
+     <div class="stat"><b>${lastCheck}</b>last autonomous check</div>
      <div class="stat"><b>${uptimeMin}m</b>uptime</div>`;
 
   const alerts = $('dash-alerts');

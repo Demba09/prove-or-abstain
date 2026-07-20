@@ -519,6 +519,7 @@ POST /investigate/query    natural language: { "query": "why did conversion drop
                            or, about a watched source instead: { "query": "...", "source_id": "my-dashboard-metric" }
 POST /investigate/suggest  setup helper: upload a sample CSV, get back sum-vs-rate metric classification
 POST /investigate/upload   CSV upload (multipart: baseline + current)
+POST /investigate/example  one-click real-world proof: { "name": "titanic" } — same pipeline, a real (not planted) dataset
 POST /investigate/sql      live database: { "dsn": "...", "baseline_query": "...", "current_query": "..." }
 POST /investigate/sheets   live Google Sheets: { "baseline_url": "...", "current_url": "..." }
 POST /investigate/series   time series (multipart: series.csv + window)

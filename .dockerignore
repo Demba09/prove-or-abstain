@@ -8,11 +8,11 @@
 .pytest_cache/
 .DS_Store
 
-# Not needed at API runtime (panels are in-memory)
+# Not needed at API runtime (synthetic panels are in-memory; examples/ IS
+# needed — benchmark.py and /investigate/example read its real-data CSVs)
 data/
 tests/
 scripts/
-examples/
 .github/
 .git/
 .claude/
