@@ -299,6 +299,13 @@ footer a { color: var(--accent-strong); }
 .dash-check-result { font-size: 13px; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 13px; background: var(--panel-alt); display: none; }
 .dash-check-result .title { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
 .dash-check-result ul { margin: 0; padding-left: 16px; font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; line-height: 1.7; }
+
+/* One obvious first action: the scenario picker is the only always-open
+   panel above the result. Everything else (watch a source, ask, CSV
+   upload) is one level down, behind a single "More" toggle — so a
+   first-time visitor sees one thing to click, not four. */
+.hero-gloss { font-size: 12.5px; color: var(--muted); margin: -6px 0 14px; }
+.hero-options { opacity: .8; }
 </style>
 </head>
 <body>
@@ -308,9 +315,10 @@ footer a { color: var(--accent-strong); }
   </header>
   <p class="sub">An AI agent that investigates metric changes. It acts when the data proves a cause — and refuses to guess otherwise.</p>
 
-  <div class="panel">
+  <div class="panel hero">
     <fieldset>
-      <legend>Built-in scenarios</legend>
+      <legend>Try it — pick a scenario</legend>
+      <p class="hero-gloss">ASSERT: a cause is proven — the agent acts on it. ABSTAIN: not enough evidence — it refuses to guess.</p>
       <div class="scenarios" id="scenarios" role="group" aria-label="Demo scenario">
         <button class="tab" type="button" data-panel="clean" aria-pressed="false"><span class="name">clean</span><span class="hint">one segment collapses &rarr; ASSERT</span></button>
         <button class="tab" type="button" data-panel="diffuse" aria-pressed="false"><span class="name">diffuse</span><span class="hint">uniform drop &rarr; ABSTAIN</span></button>
@@ -318,7 +326,7 @@ footer a { color: var(--accent-strong); }
         <button class="tab" type="button" data-panel="deep" aria-pressed="false"><span class="name">deep</span><span class="hint">one cell collapses &rarr; ASSERT, then drills down</span></button>
       </div>
     </fieldset>
-    <div class="row">
+    <div class="row hero-options">
       <label class="switch">
         <input type="checkbox" id="autopilot">
         <span class="track"></span>
@@ -330,63 +338,6 @@ footer a { color: var(--accent-strong); }
         <button type="button" class="mode-btn" id="mode-agent" data-mode="agent" aria-pressed="false">agent (Qwen drives)</button>
       </span>
     </div>
-
-    <div class="divider"></div>
-
-    <p class="eyebrow">Watch a source — no baseline file needed</p>
-    <p class="field-label" style="margin:-4px 0 6px;">Send one observation at a time under an id you choose; each new one is
-      compared automatically to everything already stored for that id.</p>
-    <details class="mini-help">
-      <summary>how the baseline works</summary>
-      <p class="field-label" style="margin:0 0 8px;">The first call for a new id only seeds it; from the second on,
-        the baseline lives in the database (not a file you re-upload) and grows with each call. Columns don't have
-        to match <code>metric, dims..., n, c</code> exactly — Qwen maps unfamiliar ones.</p>
-    </details>
-    <div class="upload-row">
-      <div class="field">
-        <label class="field-label" for="sourceId">Source id — reuse it across calls to build history</label>
-        <input type="text" id="sourceId" placeholder="my-dashboard-metric" value="demo-source">
-      </div>
-      <div class="field">
-        <label class="field-label" for="observation">One observation — same long-panel shape, or a raw source</label>
-        <input type="file" id="observation" accept=".csv">
-      </div>
-      <button class="secondary" type="button" id="observeBtn">send observation</button>
-    </div>
-
-    <div class="divider"></div>
-
-    <p class="eyebrow">Ask in plain English</p>
-    <div class="query-row">
-      <div class="field">
-        <label class="field-label" for="query" id="queryLabel">Qwen picks which built-in scenario to investigate — it never computes anything itself</label>
-        <input type="text" id="query" placeholder="why did conversion drop uniformly last week?">
-      </div>
-      <button class="secondary" type="button" id="askBtn">ask</button>
-    </div>
-    <p class="routing-note" id="routing" style="display:none;"></p>
-
-    <div class="divider"></div>
-
-    <details class="advanced" id="advancedToggle">
-      <summary>Advanced — upload two CSVs to compare directly</summary>
-      <div class="advanced-body">
-        <p class="field-label" style="margin:8px 0;">A one-off comparison with no persisted history — for that,
-          use "Watch a source" above. Also reachable via SQL or Google Sheets; see <a href="/docs">API docs</a>.</p>
-        <div class="upload-row">
-          <div class="field">
-            <label class="field-label" for="baseline">Baseline — columns: <code>metric, &lt;dimensions...&gt;, n, c</code></label>
-            <input type="file" id="baseline" accept=".csv">
-          </div>
-          <div class="field">
-            <label class="field-label" for="current">Current — same columns (see <code>examples/</code>)</label>
-            <input type="file" id="current" accept=".csv">
-          </div>
-          <button class="secondary" type="button" id="uploadBtn">investigate CSV</button>
-        </div>
-      </div>
-    </details>
-
     <p id="error" role="alert"></p>
   </div>
 
@@ -430,6 +381,63 @@ footer a { color: var(--accent-strong); }
       <ol class="trace-log" id="trace"></ol>
     </details>
   </div>
+
+  <details class="panel advanced" id="moreToggle">
+    <summary>More — watch a source over time, ask in plain English, or upload two CSVs directly</summary>
+    <div class="advanced-body">
+
+      <p class="eyebrow">Watch a source — no baseline file needed</p>
+      <p class="field-label" style="margin:-4px 0 6px;">Send one observation at a time under an id you choose; each new one is
+        compared automatically to everything already stored for that id.</p>
+      <details class="mini-help">
+        <summary>how the baseline works</summary>
+        <p class="field-label" style="margin:0 0 8px;">The first call for a new id only seeds it; from the second on,
+          the baseline lives in the database (not a file you re-upload) and grows with each call. Columns don't have
+          to match <code>metric, dims..., n, c</code> exactly — Qwen maps unfamiliar ones.</p>
+      </details>
+      <div class="upload-row">
+        <div class="field">
+          <label class="field-label" for="sourceId">Source id — reuse it across calls to build history</label>
+          <input type="text" id="sourceId" placeholder="my-dashboard-metric" value="demo-source">
+        </div>
+        <div class="field">
+          <label class="field-label" for="observation">One observation — same long-panel shape, or a raw source</label>
+          <input type="file" id="observation" accept=".csv">
+        </div>
+        <button class="secondary" type="button" id="observeBtn">send observation</button>
+      </div>
+
+      <div class="divider"></div>
+
+      <p class="eyebrow">Ask in plain English</p>
+      <div class="query-row">
+        <div class="field">
+          <label class="field-label" for="query" id="queryLabel">Qwen picks which built-in scenario to investigate — it never computes anything itself</label>
+          <input type="text" id="query" placeholder="why did conversion drop uniformly last week?">
+        </div>
+        <button class="secondary" type="button" id="askBtn">ask</button>
+      </div>
+      <p class="routing-note" id="routing" style="display:none;"></p>
+
+      <div class="divider"></div>
+
+      <p class="eyebrow">Upload two CSVs to compare directly</p>
+      <p class="field-label" style="margin:8px 0;">A one-off comparison with no persisted history — for that,
+        use "Watch a source" above. Also reachable via SQL or Google Sheets; see <a href="/docs">API docs</a>.</p>
+      <div class="upload-row">
+        <div class="field">
+          <label class="field-label" for="baseline">Baseline — columns: <code>metric, &lt;dimensions...&gt;, n, c</code></label>
+          <input type="file" id="baseline" accept=".csv">
+        </div>
+        <div class="field">
+          <label class="field-label" for="current">Current — same columns (see <code>examples/</code>)</label>
+          <input type="file" id="current" accept=".csv">
+        </div>
+        <button class="secondary" type="button" id="uploadBtn">investigate CSV</button>
+      </div>
+
+    </div>
+  </details>
 
   <details class="panel advanced" id="dashDetails">
     <summary>Autopilot dashboard — background checks, active alerts, executions</summary>

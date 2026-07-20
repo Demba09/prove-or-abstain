@@ -6,6 +6,28 @@
 
 ---
 
+## Follow-up: structural pass (post-audit)
+
+The polish findings below were all fixed, but direct feedback afterward
+("the UI is still hard to follow, especially for a time-pressed hackathon
+judge") pointed at something this audit's per-pillar framing didn't
+capture on its own: **too many equal-weight entry points**. Before this
+pass, "Built-in scenarios", "Watch a source", "Ask in plain English" and
+"Advanced" all sat in the same always-open panel — four different ways to
+start, with no cue about which one to click first.
+
+Fixed by restructuring, not rewording: the scenario picker is now the
+only always-open panel ("Try it — pick a scenario", with a one-line
+ASSERT/ABSTAIN gloss right there). Watch a source, Ask, and CSV upload
+moved into a single collapsed "More" section below the result panel —
+still one click away, but no longer competing for the first click. The
+autopilot/mode toggles stay next to the scenario picker (they change what
+clicking a scenario does) but are visually de-emphasized (`opacity: .8`)
+so they read as options, not a second decision to make before the first
+one.
+
+---
+
 ## Overall Score: 23 / 24
 
 | Pillar | Score | Verdict |
