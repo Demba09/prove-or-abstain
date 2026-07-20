@@ -1,0 +1,23 @@
+name: investigate-on-data-change
+
+on:
+  push:
+    paths: ['data/current.csv']
+  schedule:
+    - cron: '0 9 * * 1'  # every Monday at 9am UTC
+
+jobs:
+  investigate:
+    runs-on: ubuntu-latest
+    env:
+      BASE_URL: ${{ vars.PROVEO_URL || 'http://localhost:8000' }}
+    steps:
+      - name: Run autonomous check
+        run: |
+          RESULT=$(curl -sf -X POST "$BASE_URL/investigate/check")
+          VERDICT=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin)['verdict'])")
+          echo "Autonomous check: $VERDICT"
+          
+          if [ "$VERDICT" = "ASSERT_ACTED" ]; then
+            echo "Autopilot took action — check dashboard: $BASE_URL/dashboard"
+          fi

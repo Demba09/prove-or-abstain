@@ -1,0 +1,64 @@
+{
+  "name": "prove-or-abstain: investigate metric change",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "url": "http://localhost:8000/investigate/upload",
+        "options": {},
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "baseline", "value": "={{binary basename}}", "parameterType": "formBinaryData" },
+            { "name": "current", "value": "={{binary filename}}", "parameterType": "formBinaryData" },
+            { "name": "autopilot", "value": "true" },
+            { "name": "sum_metrics", "value": "" }
+          ]
+        }
+      },
+      "id": "prove-or-abstain-investigate",
+      "name": "Investigate",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json;\nif (body.verdict === 'ASSERT' && body.confidence >= 0.70) {\n  return { action: 'EXECUTE', cause: body.root_cause, detail: body.action.detail, confidence: body.confidence };\n}\nreturn { action: body.verdict === 'ABSTAIN' ? 'ESCALATE' : 'RECOMMEND', verdict: body.verdict, reasons: body.gates ? Object.entries(body.gates).filter(([_,g]) => g.verdict==='ABSTAIN').map(([d,g]) => `${d}: ${g.reasons.join('; ')}`) : [] };"
+      },
+      "id": "prove-or-abstain-decision",
+      "name": "Decide action",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": [
+            {
+              "conditions": [{"leftValue": "={{ $json.action }}", "rightValue": "EXECUTE", "operator": {"type": "string", "operation": "equals"}}],
+              "renameOutput": true,
+              "newName": "EXECUTE — autonomous action"
+            }
+          ]
+        }
+      },
+      "id": "prove-or-abstain-switch",
+      "name": "Route by verdict",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [650, 300]
+    }
+  ],
+  "connections": {
+    "Investigate": { "main": [[ { "node": "Decide action", "type": "main", "index": 0 } ]] },
+    "Decide action": { "main": [[ { "node": "Route by verdict", "type": "main", "index": 0 } ]] }
+  },
+  "pinData": {},
+  "versionId": "1",
+  "active": false,
+  "settings": {},
+  "tags": [],
+  "id": "prove-or-abstain"
+}
