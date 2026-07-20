@@ -224,6 +224,20 @@ the result still passes through the same `_validate_panel`/
 incoherent mapping before it reaches `gates.py` — a deterministic backstop,
 not a human one.
 
+A raw source doesn't even need an existing `n`/`c` pair. Many real exports
+are one row per observation with a single quantity to total (weekly sales,
+daily revenue) and no separate count columns at all. For that shape,
+`map_schema()` instead identifies a `value_column` to total and which
+columns are meaningful comparison dimensions — `_apply_schema_mapping()`
+(`api/app.py`) then **deterministically** aggregates `n = count(rows)`,
+`c = sum(value_column)`, grouped by those dimensions, and auto-marks the
+metric as sum-kind (by construction `c` is a running total, not a bounded
+success count — no need to also pass `sum_metrics`). Qwen still only
+*selects* which existing column plays which role; the groupby/count/sum
+arithmetic is plain pandas, exactly the same discipline as the rename-only
+path. Send a genuinely raw file straight to `POST /sources/{id}/observe` —
+no pre-aggregation by hand first.
+
 ## Verification gates
 
 `ASSERT` requires all four gates to pass. A failed gate produces an `ABSTAIN` with the
@@ -699,10 +713,6 @@ With MCP, a Qwen agent:
   make an old baseline increasingly insensitive to a genuine recent shift on
   a long-running source; a sane default window size, or an EWMA-style decay,
   is worth revisiting once a source has real production history behind it
-- `map_schema()`'s raw-source mapping doesn't yet handle a source with no
-  identifiable metric column at all (single implicit metric) — out of scope
-  for the current schema-mapping example, which keeps `metric` well-named on
-  purpose to isolate the dims/n/c ambiguity
 
 ## License
 

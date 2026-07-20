@@ -480,23 +480,51 @@ def _read_raw_csv(upload: UploadFile, name: str) -> pd.DataFrame:
         raise HTTPException(400, f"{name}: not a readable CSV ({exc})")
 
 
-def _apply_schema_mapping(df: pd.DataFrame, name: str) -> pd.DataFrame:
+def _apply_schema_mapping(df: pd.DataFrame, name: str) -> tuple[pd.DataFrame, str | None]:
     """Reshape a raw upload onto [metric, dims..., n, c] via llm.map_schema()
     — Qwen's decision is used directly (no human confirmation gate) but is
     always run through the same _validate_panel every other data source
     goes through, so an incoherent mapping is rejected before it reaches
-    the math either way."""
+    the math either way.
+
+    Two outcomes: a genuine n/c pair already exists as two columns -> just
+    rename them. Or map_schema() instead identifies a value_column (one row
+    per observation, a single quantity to total — e.g. raw weekly sales
+    with no separate count columns) -> deterministically aggregate
+    n=count(rows), c=sum(value_column), grouped by the selected
+    dim_columns. Plain pandas either way; only WHICH column plays which
+    role is Qwen's call, never the arithmetic.
+
+    Returns (panel, auto_sum_metric): the latter is the metric name to
+    mark "sum"-kind automatically when the aggregation path was used — by
+    construction c is a running total, not a bounded success count, so the
+    caller doesn't need to also pass it via sum_metrics. None on the
+    rename path (kind stays whatever the caller declares, default "rate")."""
     columns = list(df.columns)
     sample_rows = df.head(5).to_dict(orient="records")
     mapping = get_client().map_schema(columns, sample_rows)
-    metric_col, n_col, c_col = (mapping.get("metric_column"),
-                                mapping.get("n_column"), mapping.get("c_column"))
-    if not (metric_col and n_col and c_col):
-        raise HTTPException(
-            400, f"{name}: could not identify metric/n/c columns among "
-                f"{columns} (mapping: {mapping})")
-    renamed = df.rename(columns={metric_col: "metric", n_col: "n", c_col: "c"})
-    return _validate_panel(renamed, name)
+    metric_col, n_col, c_col, value_col = (
+        mapping.get("metric_column"), mapping.get("n_column"),
+        mapping.get("c_column"), mapping.get("value_column"))
+
+    if metric_col and n_col and c_col:
+        renamed = df.rename(columns={metric_col: "metric", n_col: "n", c_col: "c"})
+        return _validate_panel(renamed, name), None
+
+    if value_col:
+        dim_cols = mapping.get("dim_columns") or []
+        if not dim_cols:
+            raise HTTPException(
+                400, f"{name}: found a value column to aggregate ({value_col}) but "
+                    f"no dimension columns to group it by (mapping: {mapping})")
+        metric_name = metric_col or value_col.lower()
+        agg = df.groupby(dim_cols, as_index=False).agg(n=(value_col, "size"), c=(value_col, "sum"))
+        agg.insert(0, "metric", metric_name)
+        return _validate_panel(agg, name), metric_name
+
+    raise HTTPException(
+        400, f"{name}: could not identify metric/n/c columns, nor a value column to "
+            f"aggregate, among {columns} (mapping: {mapping})")
 
 
 @app.post("/sources/{source_id}/observe")
@@ -515,14 +543,17 @@ def observe_source(source_id: str,
     (/investigate/upload etc.), which remain the right tool for a one-off
     "compare these two periods" analysis with no ingestion history."""
     raw = _read_raw_csv(panel, "panel")
+    auto_sum_metric = None
     if _REQUIRED - set(raw.columns):
-        df = _apply_schema_mapping(raw, "panel")
+        df, auto_sum_metric = _apply_schema_mapping(raw, "panel")
     else:
         df = _validate_panel(raw, "panel")
 
     dims = [c for c in df.columns if c not in _RESERVED]
     metrics = sorted(df["metric"].unique())
     kinds = _parse_kinds(sum_metrics, metrics)
+    if auto_sum_metric:
+        kinds[auto_sum_metric] = "sum"          # aggregated c is a running total, not a bounded count
     _validate_rate_counts(df, "panel", kinds)
 
     result = ingest.ingest_and_investigate(

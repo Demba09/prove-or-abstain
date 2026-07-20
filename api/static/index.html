@@ -393,7 +393,9 @@ footer a { color: var(--accent-strong); }
         <summary>how the baseline works</summary>
         <p class="field-label" style="margin:0 0 8px;">The first call for a new id only seeds it; from the second on,
           the baseline lives in the database (not a file you re-upload) and grows with each call. Columns don't have
-          to match <code>metric, dims..., n, c</code> exactly — Qwen maps unfamiliar ones.</p>
+          to match <code>metric, dims..., n, c</code> exactly — Qwen maps unfamiliar ones. Genuinely raw exports
+          (one row per observation, a single amount to total, no existing count columns) work too — Qwen picks a
+          value column and grouping dimensions, then the totals are computed deterministically, not by the LLM.</p>
       </details>
       <div class="upload-row">
         <div class="field">

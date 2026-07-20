@@ -1202,10 +1202,13 @@ def test_map_schema_self_verification_corrects_first_pass(monkeypatch):
 
 
 def test_schema_mapping_rejects_incoherent_mapping_before_the_math():
-    """Data map_schema can't make sense of (no metric/n/c hints at all) is
-    rejected by _validate_panel before it ever reaches gates.py — mock or
-    real, the deterministic backstop is the same."""
-    df = pd.DataFrame({"foo": ["a", "b"], "bar": ["c", "d"], "baz": [1, 2]})
+    """Data map_schema can't make sense of — no n/c pair, no numeric
+    column to aggregate either — is rejected by _validate_panel before it
+    ever reaches gates.py — mock or real, the deterministic backstop is
+    the same. (All-string columns: unlike a table with one numeric column
+    among categorical ones, which the aggregate-instead path below can
+    now legitimately make sense of, this genuinely has nothing to total.)"""
+    df = pd.DataFrame({"foo": ["a", "b"], "bar": ["c", "d"], "baz": ["e", "f"]})
     r = client.post("/sources/badmapping/observe",
                     files={"panel": ("bad.csv", _csv(df), "text/csv")})
     assert r.status_code == 400
@@ -1230,6 +1233,83 @@ def test_schema_mapping_end_to_end_via_examples(tmp_path):
     body = r.json()
     assert body["verdict"] == "ASSERT"
     assert body["root_cause"] == {"dimension": "category", "segment": "referral"}
+
+
+# --------------------------------- schema mapping: aggregate, not just rename
+# map_schema() can also be asked about a raw file with NO n/c pair at all —
+# one row per observation (e.g. a weekly sales export), nothing to rename.
+# It identifies a value_column to SUM instead; the caller deterministically
+# aggregates n=count(rows)/c=sum(value_column) grouped by Qwen-selected
+# dims (api/app.py:_apply_schema_mapping) — Qwen still only SELECTS which
+# column plays which role, the arithmetic is plain pandas.
+
+def test_map_schema_mock_finds_an_unambiguous_value_column():
+    from prove_or_abstain.llm import template_map_schema
+    cols = ["product_category", "transaction_date", "sale_amount"]
+    sample = [{"product_category": "electronics", "transaction_date": "2024-01-05",
+              "sale_amount": 1200.50}]
+    out = template_map_schema(cols, sample)
+    assert out["value_column"] == "sale_amount"
+    assert out["n_column"] is None and out["c_column"] is None
+    assert out["dim_columns"] == ["product_category"]     # date excluded by name, not swept in
+
+
+def test_map_schema_mock_declines_when_several_numeric_columns_compete():
+    """A raw per-row export with several numeric covariates alongside the
+    real metric (a store id, a target value, and unrelated numeric
+    features) is genuinely ambiguous to a keyword scan: nothing says
+    which numeric column is "the metric" vs. a covariate. The template
+    correctly returns value_column=None rather than guess — this is the
+    real gap only Qwen's judgment closes, not a template bug."""
+    from prove_or_abstain.llm import template_map_schema
+    cols = ["Store", "Date", "Weekly_Sales", "Holiday_Flag", "Temperature",
+           "Fuel_Price", "CPI", "Unemployment"]
+    sample = [{"Store": 1, "Date": "05-02-2010", "Weekly_Sales": 1643690.9,
+              "Holiday_Flag": 0, "Temperature": 42.31, "Fuel_Price": 2.572,
+              "CPI": 211.09, "Unemployment": 8.106}]
+    out = template_map_schema(cols, sample)
+    assert out["value_column"] is None
+    assert out["n_column"] is None and out["c_column"] is None
+
+
+def test_guarded_schema_mapping_rejects_invented_value_column():
+    from prove_or_abstain.llm import QwenClient
+    cols = ["store", "week", "amount"]
+    bad = {"dim_columns": ["store"], "metric_column": None, "n_column": None,
+          "c_column": None, "value_column": "made_up_column"}
+    out = QwenClient._guarded_schema_mapping(bad, cols)
+    assert out["value_column"] is None
+
+
+def test_watch_a_source_aggregates_a_raw_no_baseline_file(tmp_path):
+    """The scenario this whole extension exists for: send a raw, per-row
+    file straight to "Watch a source" — one row per (store, week), a
+    single dollar amount, no pre-existing n/c pair anywhere, no reshaping
+    done by hand first. Store A's amount doubles between the two sends;
+    store B stays flat — the aggregation pipeline should localize the
+    move to store A, at n=1200 rows/store (well above SAMPLE_FLOOR),
+    entirely from raw uploads."""
+    from prove_or_abstain import memory
+    memory.reset()
+
+    def raw_period(amount_a, amount_b, n_rows=1200):
+        rows = ([{"store_id": "A", "week": f"2024-W{i:03d}", "amount": amount_a} for i in range(n_rows)]
+               + [{"store_id": "B", "week": f"2024-W{i:03d}", "amount": amount_b} for i in range(n_rows)])
+        return pd.DataFrame(rows)
+
+    baseline = raw_period(100.0, 100.0)
+    current = raw_period(150.0, 100.0)     # store A up 50%, store B flat
+
+    client.post("/sources/rawagg/observe", files={"panel": ("p1.csv", _csv(baseline), "text/csv")})
+    r = client.post("/sources/rawagg/observe", files={"panel": ("p2.csv", _csv(current), "text/csv")})
+    body = r.json()
+    assert body["verdict"] == "ASSERT"
+    assert body["root_cause"] == {"dimension": "store_id", "segment": "A"}
+    gate = body["gates"]["store_id"]
+    assert gate["leading_sample_n"] == 1200                # aggregated row-count, not a fabricated n
+    assert gate["leading_p"] is None                       # sum-kind: sample-floor gate, not a z-test —
+                                                             # proves "amount" was auto-marked sum-kind
+                                                             # without sum_metrics ever being passed
 
 
 # ----------------------------------------------- real, external data (not synthetic)
