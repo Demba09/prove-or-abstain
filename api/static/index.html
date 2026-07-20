@@ -334,10 +334,9 @@ footer a { color: var(--accent-strong); }
         </div>
 
         <p class="eyebrow">Watch a source — no baseline file needed</p>
-        <p class="field-label" style="margin:-4px 0 8px;">Send one observation at a time, tagged with an id you choose.
-          The first call for a new id only seeds it; every call after that is compared automatically to everything
-          persisted so far for that id — the baseline lives in the database, not in a file you re-upload. Columns
-          don't have to match <code>metric, dims..., n, c</code> exactly — Qwen maps unfamiliar ones.</p>
+        <p class="field-label" style="margin:-4px 0 8px;">Send one observation at a time — no baseline file; each is
+          compared to everything already persisted for this id. First call just seeds it. (Details in the
+          <a href="/docs">API docs</a>.)</p>
         <div class="upload-row">
           <div class="field">
             <label class="field-label" for="sourceId">Source id — reuse it across calls to build history</label>
