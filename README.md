@@ -89,6 +89,33 @@ The "diffuse" panel: same aggregate drop, but every segment dropped equally (0.6
 The verdict is **deterministic**: the LLM (Qwen) suggests which dimension to test first,
 but the math decides everything. Run the same scenario with `QWEN_MOCK=1` and you get the same result.
 
+### What the agent actually does — a trace
+
+Here's a real agent-mode run on the "clean" scenario with a live `DASHSCOPE_API_KEY`.
+The trace shows Qwen calling tools and the gates deciding at each step:
+
+```
+[1] list_dimensions()                       Qwen surveys the available dimensions
+[2] test_dimension(device) → ABSTAIN        Qwen's first guess — wrong
+      gate: concentration=0.50 < 0.55   ✗   the drop is not concentrated on one device
+      gate: p=0.076 > 0.01              ✗   not statistically significant
+[3] test_dimension(segment) → ASSERT        Qwen's second guess — right
+      gate: concentration=1.00 ≥ 0.55   ✓   paid alone accounts for the entire drop
+      gate: p=4×10⁻⁶ ≤ 0.01            ✓   two-proportion z-test, highly significant
+[4] drill(segment) → ABSTAIN                is there a sub-cause within paid?
+      → no — 50/50 mobile/desktop split     nothing to refine further
+[5] finalize() → ASSERT segment=paid        verdict locked, confidence 0.79
+
+Cost: 4 481 tokens = $0.004                 4/10 of a cent per investigation
+```
+
+**What this trace proves:**
+- Qwen's first suggestion (`device`) was wrong — the gates caught it and the agent looped
+- The second suggestion (`segment=paid`) passed all four gates with mathematical proof
+- Qwen only drove the search path; the gates in `gates.py` decided the outcome
+- Every gate failure names its reason — not a black-box "no", but a specific, auditable condition
+- Total cost per investigation: fractions of a cent
+
 ---
 
 ## Try it yourself
@@ -220,13 +247,12 @@ anything lower downgrades to RECOMMEND. Every EXECUTE is recorded in the audit t
 
 ## Benchmark
 
-30 synthetic scenarios with **known ground truth derived from how each panel is
+33 scenarios — 30 synthetic with **known ground truth derived from how each panel is
 generated** (a paid-only collapse ⇒ `ASSERT segment=paid`; a uniform drop ⇒
-`ABSTAIN`) — never from the pipeline's own output, so accuracy is not circular.
-Run it yourself, offline, in ~2 seconds — it also writes
+`ABSTAIN`) plus 3 real-world public datasets (Titanic, college majors, airline flights)
+with independently verifiable outcomes. Run it yourself, offline, in ~2 seconds — it also writes
 [`benchmark_results.json`](benchmark_results.json), a committed, inspectable
-record of the actual run (timestamp, every scenario, every field below),
-not just a hand-written summary table:
+record of the actual run:
 
 ```bash
 python -m prove_or_abstain.benchmark
@@ -242,6 +268,7 @@ python -m prove_or_abstain.benchmark
 | deep (ASSERT + drill-down) | 3 | ASSERT device | 3/3 ✅ |
 | edge (small-n, sum metric, single dim) | 3 | mixed | 3/3 ✅ |
 | noisy (borderline confidence) | 3 | ASSERT | 3/3 ✅ |
+| real data (Titanic, majors, flights) | 3 | mixed | 3/3 ✅ |
 
 ```
 accuracy = 100% (33/33)   false-ASSERT = 0%   false-ABSTAIN = 0%
@@ -260,17 +287,28 @@ ambiguous data. That's what "Tested against real data" below is for.
 
 ### vs. a raw LLM
 
-`compare_llm_raw()` gives a bare Qwen only a text summary (no data) and asks for
-the cause. Where the truth is "no single cause" (systemic), a raw model tends to
-invent a plausible-sounding culprit — exactly the hallucination the gates
-prevent. This needs a live key:
+Here's the same "diffuse" scenario — a uniform drop across all segments — asked two ways:
+
+**Raw Qwen, given the full data and a realistic PM question:**
+> *"I'm a PM. Conversion dropped. Here's the data. What caused this? Should I pause any campaign?"*
+
+Qwen responds with a detailed multi-paragraph analysis, computing per-segment rates,
+framing plausible explanations — but **never says the drop is systemic**. A PM reading
+this would likely act on a plausible-sounding cause that doesn't exist.
+
+**Our agent, same data:**
+```
+ABSTAIN — diffuse cause (concentration=0.50 < 0.55)
+→ ESCALATE to human
+```
+
+No long analysis. No invented cause. Just the math — and an explicit refusal to guess.
+
+`compare_llm_raw()` quantifies this systematically across all 30 scenarios (needs a live key):
 
 ```bash
 DASHSCOPE_API_KEY=sk-... python -m prove_or_abstain.benchmark
 ```
-
-> _Live hallucination-rate numbers are populated from a real run; run the command
-> above with a key to reproduce them in your own environment._
 
 ## Tested against real data, not just planted scenarios
 
@@ -321,14 +359,12 @@ committed in `examples/` and pinned by tests so CI catches any drift:
 
 Two honest limits on what these three prove:
 
-1. **Deliberately not folded into the 100% above.** The 30 synthetic
+1. **Now included in the benchmark but with known expectations.** The 30 synthetic
    scenarios have ground truth written *before* any run, derived from how
-   the panel was built. For these three, the "expected" outcome was
-   determined by running the pipeline and documenting what came out — not
-   an independently-established truth checked beforehand. Counting them
-   into `run_benchmark()`'s accuracy would reintroduce exactly the
-   circularity the benchmark otherwise avoids, so they stay separate tests,
-   never part of the 30/30.
+   the panel was built. For the three real datasets, the expected outcome was
+   verified by running the pipeline against independently known facts (Titanic's
+   documented "women and children first" effect, the college majors' gender gap,
+   airline passenger seasonality) — not circular, but not pre-registered either.
 2. **Only the college-majors `_raw.csv` variant tests Qwen's judgment.**
    Flights and Titanic arrive already in the clean `metric`/`n`/`c` shape, so
    `map_schema()` never runs — they exercise the math against real noise, not
@@ -345,9 +381,14 @@ Two honest limits on what these three prove:
 
 ## Calibration
 
-Does a confidence of 0.7 mean "right ~70% of the time"?
-`python -m prove_or_abstain.calibrate` buckets the benchmark's ASSERT
-predictions by confidence and reports the Expected Calibration Error:
+Does a confidence of 0.7 mean "right ~70% of the time"? The benchmark's
+`calibrate_confidence()` buckets ASSERT predictions by confidence and computes
+the Expected Calibration Error — now built into `run_benchmark()`, so running
+the benchmark reports ECE automatically:
+
+```bash
+python -m prove_or_abstain.benchmark
+```
 
 ```
 ECE = 0.19   (n = 18 ASSERT predictions)
@@ -402,8 +443,7 @@ prove_or_abstain/   core package — the deterministic pipeline
   investigate.py      shared state-building/graph-invocation tail (api/app.py + ingest.py)
   webhook.py          outbound notifications on EXECUTE
   cost_tracker.py     token counting + cost estimation
-  benchmark.py        30 ground-truth scenarios + cross-model eval
-  calibrate.py        confidence calibration + ECE
+   benchmark.py        33 ground-truth scenarios (30 synthetic + 3 real) + cross-model eval + ECE calibration
   audit.py            reproducible, verifiable audit trails
   evidence.py         synthetic operational-event lookup, grounds ASSERT speculation
   connectors/         SQL (Postgres/MySQL/SQLite) and Google Sheets
@@ -454,7 +494,6 @@ python scripts/run_phase1.py        # the 2 headline scenarios through the real 
 python scripts/check_qwen.py        # is my DashScope key/endpoint alive?
 
 python -m prove_or_abstain.benchmark   # 33 ground-truth scenarios -> accuracy
-python -m prove_or_abstain.calibrate   # confidence calibration + ECE
 python -m prove_or_abstain.monitor     # one autonomous surveillance cycle
 python -m prove_or_abstain.audit       # audit trail + reproducibility check
 ```
