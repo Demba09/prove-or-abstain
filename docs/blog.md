@@ -8,7 +8,7 @@ Ce scénario, tous ceux qui ont bossé dans une boîte avec un dashboard l'ont v
 
 J'ai donc construit l'inverse : **un agent dont l'autonomie est conditionnée par une preuve mathématique**, et dont la seule alternative à agir est un refus propre, motivé, nommant exactement *pourquoi* il ne peut pas localiser de cause. Pas un "je sais pas" flou — une raison précise et vérifiable.
 
-Ce n'est pas juste une intuition. C'est un pipeline à 4 portes déterministes, un benchmark de 30 scénarios à 100% d'accuracy, et 0 faux positifs (false-ASSERT). Voici comment ça marche.
+Ce n'est pas juste une intuition. C'est un pipeline à 4 portes déterministes, un benchmark de 20 scénarios à 100% d'accuracy (10 synthétiques + 10 datasets publics réels), et 0 faux positifs (false-ASSERT). Voici comment ça marche.
 
 ---
 
@@ -73,19 +73,16 @@ Les deux modes appellent les mêmes fonctions mathématiques. Le choix du mode c
 
 ---
 
-## Un benchmark qui dit la vérité (30 scénarios, 100% accuracy)
+## Un benchmark qui dit la vérité (20 scénarios, 100% accuracy)
 
-Le benchmark contient 30 scénarios synthétiques avec une ground truth connue à l'avance (on sait quel scénario a été « planté » avec quel bug). Catégories :
+Le benchmark contient **10 scénarios synthétiques** (un par edge case des gates) et **10 datasets publics réels** issus de seaborn, vega-datasets, UCI et fivethirtyeight.
 
-- **7 clean → ASSERT** (collapse d'un segment ou device)
-- **3 clean → ABSTAIN** (collapse réparti sur 2+ segments)
-- **5 diffuse → ABSTAIN** (baisse uniforme)
-- **3 mixshift → ABSTAIN** (composition + taux bougent ensemble)
-- **3 deep → ASSERT + drill-down** (un seul croisement segment×device)
-- **3 edge cases** (métrique somme, tiny sample, single dimension)
-- **3 noisy** (baisse réelle avec jitter)
+Synthétiques : clean ×2, abstain, diffuse, mixshift, deep, edge ×3, noisy
+Réels : Titanic, college majors, penguins, flights, tips, mpg, diamonds, gapminder, cars, iris
 
-Résultat : **30/30 en mode graph ET agent — 100% accuracy, 0% false-ASSERT, ECE 0.19**. Le benchmark est exécuté en CI et le pipeline refuse de passer si l'accuracy tombe sous 100%.
+Parmi les 10 datasets réels, 7 produisent ABSTAIN — parce que dans le monde réel, la plupart des changements sont systémiques, pas localisables. L'agent le prouve.
+
+Résultat : **20/20 en mode graph ET agent — 100% accuracy, 0% false-ASSERT, ECE 0.19**. Le benchmark est exécuté en CI et le pipeline refuse de passer si l'accuracy tombe sous 100%.
 
 ---
 

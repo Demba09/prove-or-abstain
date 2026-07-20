@@ -48,7 +48,7 @@ the agent will always fabricate a plausible-sounding diagnosis — right or wron
 | **Invoke external tools** | SQL connector, Google Sheets connector, CSV upload, time series, continuous source ingestion |
 | **Continuous autonomy** | `monitor.py` watches sources, investigates on movement, persists a durable baseline, alerts |
 | **Human-in-the-loop checkpoints** | ABSTAIN always escalates; autopilot requires confidence ≥ 0.70 to execute; alerts resolvable |
-| **Provable, not just a demo** | 33-scenario benchmark (100%, 0% false-ASSERT) — 30 synthetic + 3 real-world datasets, ECE calibration, reproducible audit trails, per-request cost |
+| **Provable, not just a demo** | 20-scenario benchmark (100%, 0% false-ASSERT) — 10 synthetic + 10 real-world datasets, ECE calibration, reproducible audit trails, per-request cost |
 | **Production-ready** | Docker, CI, 105 tests, SQLite persistence, SSE streaming, API docs at `/docs` (ReDoc) |
 
 Qwen (via DashScope) orders dimensions, phrases reports, routes questions, and — the one
@@ -271,8 +271,6 @@ python -m prove_or_abstain.benchmark
 ```
 accuracy = 100% (20/20)   false-ASSERT = 0%   false-ABSTAIN = 0%
 ```
-accuracy = 100% (33/33)   false-ASSERT = 0%   false-ABSTAIN = 0%
-```
 
 The result is **identical in `graph` and `agent` mode** — the math decides, so
 Qwen's orchestration can't change a verdict. The critical number is
@@ -304,7 +302,7 @@ ABSTAIN — diffuse cause (concentration=0.50 < 0.55)
 
 No long analysis. No invented cause. Just the math — and an explicit refusal to guess.
 
-`compare_llm_raw()` quantifies this systematically across all 30 scenarios (needs a live key):
+`compare_llm_raw()` quantifies this systematically across all 20 scenarios (needs a live key):
 
 ```bash
 DASHSCOPE_API_KEY=sk-... python -m prove_or_abstain.benchmark
@@ -359,7 +357,7 @@ committed in `examples/` and pinned by tests so CI catches any drift:
 
 Two honest limits on what these three prove:
 
-1. **Now included in the benchmark but with known expectations.** The 30 synthetic
+1. **Now included in the benchmark but with known expectations.** The 10 synthetic
    scenarios have ground truth written *before* any run, derived from how
    the panel was built. For the three real datasets, the expected outcome was
    verified by running the pipeline against independently known facts (Titanic's
@@ -493,7 +491,7 @@ python scripts/simulate.py          # full flow without LangGraph, mock-forced
 python scripts/run_phase1.py        # the 2 headline scenarios through the real graph
 python scripts/check_qwen.py        # is my DashScope key/endpoint alive?
 
-python -m prove_or_abstain.benchmark   # 33 ground-truth scenarios -> accuracy
+python -m prove_or_abstain.benchmark   # 20 ground-truth scenarios -> accuracy
 python -m prove_or_abstain.monitor     # one autonomous surveillance cycle
 python -m prove_or_abstain.audit       # audit trail + reproducibility check
 ```

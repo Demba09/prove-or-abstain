@@ -90,8 +90,8 @@ Cloud Function Compute as-is.
   mock heuristic can't map it (proven by a test asserting it 400s), which is
   finally a fair, non-softball test of `map_schema()`'s judgment rather than
   the math.
-- **Calibration, not just accuracy.** `calibrate.py` buckets ASSERT
-  confidence and reports Expected Calibration Error — does a 0.7 confidence
+- **Calibration, not just accuracy.** `calibrate_confidence()` in `benchmark.py`
+  buckets ASSERT confidence and reports Expected Calibration Error — does a 0.7 confidence
   actually mean "right ~70% of the time"? (ECE ≈ 0.19, conservative:
   under-confident rather than over-confident, the safe direction for an
   agent that can act.)
