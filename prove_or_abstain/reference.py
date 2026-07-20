@@ -22,6 +22,18 @@ import pandas as pd
 from prove_or_abstain import memory
 
 
+def pool_observations(observations: list[dict]) -> pd.DataFrame:
+    """Sum raw (n, c) counts cell-by-cell across a list of observations (as
+    returned by memory.get_observations) into one long-panel DataFrame.
+    Shared by build_reference_window() below and by the "ask about this
+    source" follow-up (api/app.py), which needs to pool an explicit slice
+    of observations rather than everything-but-window."""
+    panels = [o["panel"] for o in observations]
+    concat = pd.concat(panels, ignore_index=True)
+    keys = [c for c in concat.columns if c not in ("n", "c")]
+    return concat.groupby(keys, as_index=False)[["n", "c"]].sum()
+
+
 def build_reference_window(source_id: str, dims: list[str],
                            window: int | None = None) -> pd.DataFrame:
     """Pool the last `window` PRIOR observations for source_id (all of them
@@ -43,8 +55,4 @@ def build_reference_window(source_id: str, dims: list[str],
                          f"— cold start must be handled before pooling a reference")
     if window is not None:
         observations = observations[-window:]
-
-    panels = [o["panel"] for o in observations]
-    concat = pd.concat(panels, ignore_index=True)
-    keys = [c for c in concat.columns if c not in ("n", "c")]
-    return concat.groupby(keys, as_index=False)[["n", "c"]].sum()
+    return pool_observations(observations)

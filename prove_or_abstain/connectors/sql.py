@@ -23,6 +23,10 @@ import pandas as pd
 from sqlalchemy import create_engine
 
 _READ_ONLY_RE = re.compile(r"^\s*(select|with)\b", re.IGNORECASE)
+# Single/double-quoted literals, handling standard SQL '' / "" escaping —
+# stripped before the ';' count so a legitimate WHERE note = 'a; b' isn't
+# mistaken for a second statement. Still not a real SQL parser (see below).
+_STRING_LITERAL_RE = re.compile(r"'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"")
 
 
 class SqlQueryError(ValueError):
@@ -33,7 +37,8 @@ class SqlQueryError(ValueError):
 def _guard_single_select(query: str) -> None:
     if not _READ_ONLY_RE.match(query):
         raise SqlQueryError("only a SELECT (or WITH ... SELECT) query is allowed")
-    if ";" in query.strip().rstrip(";"):
+    without_literals = _STRING_LITERAL_RE.sub("", query.strip().rstrip(";"))
+    if ";" in without_literals:
         raise SqlQueryError("only a single statement is allowed (remove the ';')")
 
 

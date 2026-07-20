@@ -94,6 +94,15 @@ legend { padding: 0; margin: 0 0 10px; font-size: 11px; letter-spacing: .08em; t
 .switch input:checked + .track::after { transform: translateX(15px); }
 .switch input:focus-visible + .track { outline: 2px solid var(--focus); outline-offset: 2px; }
 
+.mode-select { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+.mode-select .mode-label { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-right: 2px; }
+.mode-btn {
+  font: inherit; font-size: 12.5px; padding: 5px 11px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--paper); color: var(--muted);
+}
+.mode-btn:hover { border-color: var(--accent); }
+.mode-btn[aria-pressed="true"] { border-color: var(--accent); background: var(--accent); color: #fff; font-weight: 600; }
+
 .divider { border-top: 1px solid var(--line); margin: 16px 0; }
 label.field-label { display: block; font-size: 12.5px; color: var(--muted); margin: 0 0 6px; }
 
@@ -141,6 +150,7 @@ button:disabled { opacity: .5; cursor: wait; }
 .stamp.abstain { color: var(--abstain); background: var(--abstain-bg); }
 .stamp.none { color: var(--muted); background: var(--panel-alt); border-style: solid; }
 .verdict-meta { color: var(--muted); font-size: 13.5px; }
+.verdict-meta.cold-start { color: var(--ink); font-size: 15px; }
 .verdict-meta b { color: var(--ink); }
 .verdict-meta .num { font-family: ui-monospace, "SF Mono", Consolas, monospace; font-variant-numeric: tabular-nums; }
 
@@ -193,8 +203,11 @@ table.dataset-table thead th { color: var(--muted); font-weight: 600; text-trans
 }
 .drilldown b { color: var(--accent-strong); }
 
-.action { border-radius: 8px; padding: 12px 14px; margin: 14px 0; font-size: 13.5px; background: var(--panel-alt); }
+.action { border-radius: 8px; padding: 12px 14px; margin: 14px 0; font-size: 13.5px; background: var(--panel-alt); border-left: 3px solid var(--line); }
 .action .kind { font-weight: 700; letter-spacing: .03em; font-size: 11px; text-transform: uppercase; color: var(--accent-strong); margin-right: 8px; }
+.action-execute { border-left-color: var(--assert); background: var(--assert-bg); }
+.action-execute .kind { color: var(--assert); }
+.action-recommend { border-left-color: var(--accent); }
 
 .report {
   font-size: 15px; line-height: 1.65; margin: 16px 0; padding: 14px 16px;
@@ -218,6 +231,22 @@ details.trace summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 }
 .trace-log li::before { content: "› "; color: var(--accent); }
 
+.agent-trace { border: 1px solid var(--accent); border-radius: 8px; padding: 12px 14px; margin: 14px 0; }
+.agent-trace .tag { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--accent-strong); font-weight: 600; }
+.agent-trace .note { font-size: 12px; color: var(--muted); margin: 4px 0 10px; }
+.agent-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 7px; }
+.agent-steps li {
+  font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px;
+  display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap;
+}
+.agent-steps .n { color: var(--muted); min-width: 20px; }
+.agent-steps .call { color: var(--ink); }
+.agent-steps .call b { color: var(--accent-strong); }
+.agent-steps .tool-verdict { font-size: 10.5px; font-weight: 700; letter-spacing: .03em; padding: 1px 7px; border-radius: 999px; }
+.agent-steps .tool-verdict.assert { color: var(--assert); background: var(--assert-bg); }
+.agent-steps .tool-verdict.abstain { color: var(--abstain); background: var(--abstain-bg); }
+.agent-steps .swept { font-size: 10.5px; color: var(--muted); font-style: italic; }
+
 footer { color: var(--muted); font-size: 12.5px; margin-top: 26px; line-height: 1.7; }
 footer a { color: var(--accent-strong); }
 .advanced { margin-top: 0; font-size: 14px; }
@@ -225,7 +254,6 @@ footer a { color: var(--accent-strong); }
 .advanced > summary:hover { color: var(--accent-strong); }
 .advanced-body { padding: 0 0 4px; }
 
-#dash-panel { display: none; }
 .dash-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
 .dash-header h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; margin: 0; }
 .dash-stats { display: flex; gap: 20px; font-size: 13px; color: var(--muted); flex-wrap: wrap; margin-bottom: 16px; }
@@ -266,6 +294,30 @@ footer a { color: var(--accent-strong); }
         <span class="track"></span>
         autopilot (execute at confidence &ge; 0.70)
       </label>
+      <span class="mode-select" role="group" aria-label="Orchestration mode">
+        <span class="mode-label">orchestration</span>
+        <button type="button" class="mode-btn" id="mode-graph" data-mode="graph" aria-pressed="true">graph</button>
+        <button type="button" class="mode-btn" id="mode-agent" data-mode="agent" aria-pressed="false">agent (Qwen drives)</button>
+      </span>
+    </div>
+
+    <div class="divider"></div>
+
+    <p class="eyebrow">Watch a source — no baseline file needed</p>
+    <p class="field-label" style="margin:-4px 0 8px;">Send one observation at a time, tagged with an id you choose.
+      The first call for a new id only seeds it; every call after that is compared automatically to everything
+      persisted so far for that id — the baseline lives in the database, not in a file you re-upload. Columns
+      don't have to match <code>metric, dims..., n, c</code> exactly — Qwen maps unfamiliar ones.</p>
+    <div class="upload-row">
+      <div class="field">
+        <label class="field-label" for="sourceId">Source id — reuse it across calls to build history</label>
+        <input type="text" id="sourceId" placeholder="my-dashboard-metric" value="demo-source">
+      </div>
+      <div class="field">
+        <label class="field-label" for="observation">One observation — same long-panel shape, or a raw source</label>
+        <input type="file" id="observation" accept=".csv">
+      </div>
+      <button class="secondary" type="button" id="observeBtn">send observation</button>
     </div>
 
     <div class="divider"></div>
@@ -273,7 +325,7 @@ footer a { color: var(--accent-strong); }
     <p class="eyebrow">Ask in plain English</p>
     <div class="query-row">
       <div class="field">
-        <label class="field-label" for="query">Qwen picks which panel to investigate — it never computes anything itself</label>
+        <label class="field-label" for="query" id="queryLabel">Qwen picks which built-in scenario to investigate — it never computes anything itself</label>
         <input type="text" id="query" placeholder="why did conversion drop uniformly last week?">
       </div>
       <button class="secondary" type="button" id="askBtn">ask</button>
@@ -283,10 +335,10 @@ footer a { color: var(--accent-strong); }
     <div class="divider"></div>
 
     <details class="advanced" id="advancedToggle">
-      <summary>Advanced — bring your own data (CSV, SQL, Google Sheets)</summary>
+      <summary>Advanced — upload two CSVs to compare directly</summary>
       <div class="advanced-body">
-
-        <p class="eyebrow" style="margin-top:8px;">Upload CSVs</p>
+        <p class="field-label" style="margin:8px 0;">A one-off comparison with no persisted history — for that,
+          use "Watch a source" above. Also reachable via SQL or Google Sheets; see <a href="/docs">API docs</a>.</p>
         <div class="upload-row">
           <div class="field">
             <label class="field-label" for="baseline">Baseline — columns: <code>metric, &lt;dimensions...&gt;, n, c</code></label>
@@ -298,61 +350,6 @@ footer a { color: var(--accent-strong); }
           </div>
           <button class="secondary" type="button" id="uploadBtn">investigate CSV</button>
         </div>
-
-        <div class="divider"></div>
-
-        <p class="eyebrow">Query a live database</p>
-        <div class="field">
-          <label class="field-label" for="dsn">Connection string — your own credentials, read-only queries only</label>
-          <input type="text" id="dsn" placeholder="postgresql://user:pass@host/db or sqlite:///demo.db">
-        </div>
-        <div class="upload-row" style="margin-top:10px;">
-          <div class="field">
-            <label class="field-label" for="baselineQuery">Baseline query — a single SELECT, long-panel columns</label>
-            <textarea id="baselineQuery" rows="2" placeholder="SELECT metric, segment, device, n, c FROM conversions WHERE period = 'last_month'"></textarea>
-          </div>
-          <div class="field">
-            <label class="field-label" for="currentQuery">Current query — same shape</label>
-            <textarea id="currentQuery" rows="2" placeholder="SELECT metric, segment, device, n, c FROM conversions WHERE period = 'this_month'"></textarea>
-          </div>
-          <button class="secondary" type="button" id="sqlBtn">investigate SQL</button>
-        </div>
-
-        <div class="divider"></div>
-
-        <p class="eyebrow">Read from Google Sheets</p>
-        <div class="upload-row">
-          <div class="field">
-            <label class="field-label" for="baselineSheet">Baseline sheet URL — shared as "anyone with the link"</label>
-            <input type="text" id="baselineSheet" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0">
-          </div>
-          <div class="field">
-            <label class="field-label" for="currentSheet">Current sheet URL — same long-panel columns</label>
-            <input type="text" id="currentSheet" placeholder="https://docs.google.com/spreadsheets/d/.../edit#gid=0">
-          </div>
-          <button class="secondary" type="button" id="sheetsBtn">investigate sheets</button>
-        </div>
-
-        <div class="divider"></div>
-
-        <p class="eyebrow">Watch a source — no baseline file needed</p>
-        <p class="field-label" style="margin:-4px 0 8px;">Send one observation at a time, tagged with an id you choose.
-          The first call for a new id only seeds it (nothing to compare against yet); every call after that is
-          compared automatically to everything persisted so far for that id — the baseline lives in the database,
-          not in a file you re-upload. Columns don't have to match <code>metric, dims..., n, c</code> exactly —
-          Qwen maps unfamiliar ones (see <code>examples/schema_mapping_seed.csv</code>).</p>
-        <div class="upload-row">
-          <div class="field">
-            <label class="field-label" for="sourceId">Source id — reuse it across calls to build history</label>
-            <input type="text" id="sourceId" placeholder="my-dashboard-metric" value="demo-source">
-          </div>
-          <div class="field">
-            <label class="field-label" for="observation">One observation — same long-panel shape, or a raw source</label>
-            <input type="file" id="observation" accept=".csv">
-          </div>
-          <button class="secondary" type="button" id="observeBtn">send observation</button>
-        </div>
-
       </div>
     </details>
 
@@ -392,31 +389,54 @@ footer a { color: var(--accent-strong); }
 
     <div class="spec" id="spec" style="display:none;"></div>
 
+    <div class="agent-trace" id="agentTrace" style="display:none;"></div>
+
     <details class="trace">
       <summary>investigation trace</summary>
       <ol class="trace-log" id="trace"></ol>
     </details>
   </div>
 
-  <div class="panel" id="dash-panel">
-    <div class="dash-header">
-      <h2>Autopilot Dashboard</h2>
-      <button class="secondary" type="button" id="dash-check-btn" onclick="runAutonomousCheck()">run autonomous check</button>
+  <details class="panel advanced" id="dashDetails">
+    <summary>Autopilot dashboard — background checks, active alerts, executions</summary>
+    <div class="advanced-body">
+      <div class="dash-header">
+        <button class="secondary" type="button" id="dash-check-btn" onclick="runAutonomousCheck()">run autonomous check</button>
+      </div>
+      <div class="dash-stats" id="dash-stats"></div>
+      <div id="dash-alerts"></div>
+      <div class="dash-empty" id="dash-empty">Loading&hellip;</div>
     </div>
-    <div class="dash-stats" id="dash-stats"></div>
-    <div id="dash-alerts"></div>
-    <div class="dash-empty" id="dash-empty">Loading&hellip;</div>
-  </div>
+  </details>
 
   <footer>
     Every number comes from pandas/numpy; the LLM only orders the dimensions to try, routes free-text
-    questions to a panel, and phrases the report. <a href="/docs">API docs</a>
+    questions to a panel or segment, and phrases the report. <a href="/docs">API docs</a>
   </footer>
 </main>
 
 <script>
 const $ = id => document.getElementById(id);
 let activePanel = null;
+let activeContext = null;   // {type:'panel', panel} | {type:'source', source_id} — what "ask" targets
+let orchestrationMode = 'graph';   // 'graph' (fixed pipeline) | 'agent' (Qwen drives via tool calls)
+
+function setMode(mode) {
+  orchestrationMode = mode;
+  $('mode-graph').setAttribute('aria-pressed', String(mode === 'graph'));
+  $('mode-agent').setAttribute('aria-pressed', String(mode === 'agent'));
+}
+
+function updateQueryLabel() {
+  const label = $('queryLabel');
+  if (activeContext && activeContext.type === 'source') {
+    label.textContent = `Asking about watched source "${activeContext.source_id}" — Qwen only narrows it to a segment, it never computes anything itself`;
+  } else if (activeContext && activeContext.type === 'panel') {
+    label.textContent = `Asking about the "${activeContext.panel}" scenario — Qwen picks the panel/segment, it never computes anything itself`;
+  } else {
+    label.textContent = 'Qwen picks which built-in scenario to investigate — it never computes anything itself';
+  }
+}
 
 function setBusy(b) { document.querySelectorAll('button').forEach(x => x.disabled = b); }
 function fail(msg) { $('error').style.display = 'block'; $('error').textContent = msg; }
@@ -435,6 +455,7 @@ async function call(url, opts) {
     const body = await r.json();
     if (!r.ok) throw new Error(body.detail ? JSON.stringify(body.detail) : r.statusText);
     render(body);
+    loadDashboard();   // an EXECUTE just happened, or didn't — either way, reflect it now, not in up to 30s
   } catch (e) {
     fail(e.message);
   } finally {
@@ -447,7 +468,7 @@ function runPanel(panel) {
   call('/investigate', {
     method: 'POST',
     headers: {'content-type': 'application/json'},
-    body: JSON.stringify({panel, autopilot: $('autopilot').checked}),
+    body: JSON.stringify({panel, autopilot: $('autopilot').checked, mode: orchestrationMode}),
   });
 }
 
@@ -455,10 +476,13 @@ function runQuery() {
   const query = $('query').value.trim();
   if (!query) return fail('Type a question first.');
   $('routing').style.display = 'none';
+  const payload = {query, autopilot: $('autopilot').checked};
+  if (activeContext && activeContext.type === 'source') payload.source_id = activeContext.source_id;
+  else if (activeContext && activeContext.type === 'panel') payload.previous_panel = activeContext.panel;
   call('/investigate/query', {
     method: 'POST',
     headers: {'content-type': 'application/json'},
-    body: JSON.stringify({query, autopilot: $('autopilot').checked}),
+    body: JSON.stringify(payload),
   });
 }
 
@@ -473,35 +497,6 @@ function runUpload() {
   call('/investigate/upload', {method: 'POST', body: fd});
 }
 
-function runSql() {
-  const dsn = $('dsn').value.trim();
-  const baselineQuery = $('baselineQuery').value.trim();
-  const currentQuery = $('currentQuery').value.trim();
-  if (!dsn || !baselineQuery || !currentQuery) {
-    return fail('Fill in the connection string and both queries.');
-  }
-  setActiveTab(null);
-  call('/investigate/sql', {
-    method: 'POST',
-    headers: {'content-type': 'application/json'},
-    body: JSON.stringify({dsn, baseline_query: baselineQuery, current_query: currentQuery,
-                          autopilot: $('autopilot').checked}),
-  });
-}
-
-function runSheets() {
-  const baselineUrl = $('baselineSheet').value.trim();
-  const currentUrl = $('currentSheet').value.trim();
-  if (!baselineUrl || !currentUrl) return fail('Fill in both sheet URLs.');
-  setActiveTab(null);
-  call('/investigate/sheets', {
-    method: 'POST',
-    headers: {'content-type': 'application/json'},
-    body: JSON.stringify({baseline_url: baselineUrl, current_url: currentUrl,
-                          autopilot: $('autopilot').checked}),
-  });
-}
-
 function runObserve() {
   const sourceId = $('sourceId').value.trim();
   const obs = $('observation').files[0];
@@ -510,13 +505,19 @@ function runObserve() {
   const fd = new FormData();
   fd.append('panel', obs);
   fd.append('autopilot', $('autopilot').checked);
+  fd.append('mode', orchestrationMode);
   call(`/sources/${encodeURIComponent(sourceId)}/observe`, {method: 'POST', body: fd});
 }
 
 function render(b) {
   $('result').style.display = 'block';
 
-  if (b.routing) {
+  if (b.routing && b.routing.source_id) {
+    setActiveTab(null);
+    $('routing').style.display = 'block';
+    $('routing').textContent = `asked about source ${b.routing.source_id}` +
+      (b.routing.filter ? ` · filtered to ${b.routing.filter.dim}=${b.routing.filter.segment}` : ' · no segment named, using the full comparison');
+  } else if (b.routing) {
     setActiveTab(b.panel);
     $('routing').style.display = 'block';
     $('routing').textContent = `routed to panel ${b.panel}` +
@@ -529,12 +530,17 @@ function render(b) {
 
   const v = b.verdict || 'NO_ANOMALY';
   const stamp = $('verdict');
-  stamp.textContent = v;
-  stamp.className = 'stamp ' + (v === 'ASSERT' ? 'assert' : v === 'ABSTAIN' ? 'abstain' : 'none');
+  if (b.cold_start) {
+    stamp.style.display = 'none';
+  } else {
+    stamp.style.display = '';
+    stamp.textContent = v;
+    stamp.className = 'stamp ' + (v === 'ASSERT' ? 'assert' : v === 'ABSTAIN' ? 'abstain' : 'none');
+  }
 
   const metaParts = [];
   if (b.cold_start) {
-    metaParts.push(`source <b>${b.source_id}</b> seeded — send another observation for it to compare against`);
+    metaParts.push(`✓ source <b>${b.source_id}</b> seeded — nothing to compare against yet, send another observation for the same id`);
   } else {
     if (b.source_id) metaParts.push(`source <b>${b.source_id}</b>`);
     if (b.confidence != null) metaParts.push(`confidence <span class="num">${b.confidence.toFixed(2)}</span>`);
@@ -542,6 +548,13 @@ function render(b) {
     else if (v === 'ABSTAIN') metaParts.push('no localized cause');
   }
   $('meta').innerHTML = metaParts.join(' &nbsp;·&nbsp; ');
+  $('meta').className = 'verdict-meta' + (b.cold_start ? ' cold-start' : '');
+
+  // "ask" targets whatever just produced a real (non-cold-start) result —
+  // a watched source once it has something to compare, else a scenario.
+  if (b.source_id && !b.cold_start) activeContext = {type: 'source', source_id: b.source_id};
+  else if (b.panel) activeContext = {type: 'panel', panel: b.panel};
+  updateQueryLabel();
 
   const exhibits = $('exhibits');
   exhibits.innerHTML = '';
@@ -567,7 +580,10 @@ function render(b) {
   }
 
   $('action').style.display = b.action ? 'block' : 'none';
-  if (b.action) $('action').textContent = `${b.action.kind} — ${b.action.detail}`;
+  if (b.action) {
+    $('action').className = 'action action-' + b.action.kind.toLowerCase();
+    $('action').innerHTML = `<span class="kind">${b.action.kind}</span>${b.action.detail}`;
+  }
 
   $('report').style.display = b.report ? 'block' : 'none';
   if (b.report) {
@@ -586,7 +602,37 @@ function render(b) {
 
   $('trace').innerHTML = (b.trace || []).map(t => `<li>${t}</li>`).join('');
 
+  renderAgentTrace(b.agent_trace || [], b.llm);
+
   showDataset(b);
+}
+
+function renderAgentTrace(steps, llm) {
+  const box = $('agentTrace');
+  if (!steps.length) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  // In mock/fallback mode the loop is a deterministic replay of the same
+  // tool-call structure; only a real key means Qwen actually chose the path.
+  const isReal = llm && llm.mode === 'real';
+  const note = isReal
+    ? `Qwen chose each call below via tool-calling. A determinism guard re-checks every untested dimension before concluding, so the verdict is identical to graph mode — Qwen drove the path, not the outcome.`
+    : `Offline replay (<code>${llm ? llm.mode : 'mock'}</code>): the same tool-call structure Qwen would drive, run deterministically. With a real <code>DASHSCOPE_API_KEY</code> these become Qwen's own choices — same verdict either way.`;
+
+  const rows = steps.map(s => {
+    const dim = s.arguments && s.arguments.dimension;
+    const v = s.result && s.result.verdict;
+    const badge = v ? `<span class="tool-verdict ${v.toLowerCase()}">${v}</span>` : '';
+    const swept = s.mode === 'determinism-sweep' ? `<span class="swept">determinism guard</span>` : '';
+    const callText = dim
+      ? `<b>${s.tool}</b>(${dim})`
+      : `<b>${s.tool}</b>(${Object.values(s.arguments || {}).join(', ')})`;
+    return `<li><span class="n">${s.step}.</span><span class="call">${callText}</span>${badge}${swept}</li>`;
+  }).join('');
+
+  box.innerHTML =
+    `<div class="tag">Qwen's tool-call trace — agent mode</div>
+     <p class="note">${note}</p>
+     <ol class="agent-steps">${rows}</ol>`;
 }
 
 // -------------------------------------------------------------- dataset viz
@@ -701,11 +747,11 @@ async function showDataset(body) {
 }
 
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => runPanel(t.dataset.panel)));
+$('mode-graph').addEventListener('click', () => setMode('graph'));
+$('mode-agent').addEventListener('click', () => setMode('agent'));
 $('askBtn').addEventListener('click', runQuery);
 $('query').addEventListener('keydown', e => { if (e.key === 'Enter') runQuery(); });
 $('uploadBtn').addEventListener('click', runUpload);
-$('sqlBtn').addEventListener('click', runSql);
-$('sheetsBtn').addEventListener('click', runSheets);
 $('observeBtn').addEventListener('click', runObserve);
 
 // ---------------------------------------------------------------- dashboard
@@ -719,8 +765,6 @@ async function loadDashboard() {
 }
 
 function renderDashboard(d) {
-  $('dash-panel').style.display = 'block';
-
   const stats = $('dash-stats');
   const lastCheck = d.last_check_at ? new Date(d.last_check_at * 1000).toLocaleTimeString() : 'never';
   const uptimeMin = Math.floor(d.uptime_seconds / 60);
@@ -803,9 +847,11 @@ async function runAutonomousCheck() {
   }
 }
 
-// load dashboard on page load + refresh every 30s
-loadDashboard();
-setInterval(loadDashboard, 30000);
+// load only when the dashboard is actually opened, then keep it fresh while open
+$('dashDetails').addEventListener('toggle', () => {
+  if ($('dashDetails').open) loadDashboard();
+});
+setInterval(() => { if ($('dashDetails').open) loadDashboard(); }, 30000);
 </script>
 </body>
 </html>

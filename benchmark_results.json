@@ -1,0 +1,630 @@
+{
+  "generated_at": "2026-07-20T00:55:25.823550+00:00",
+  "generated_by": "python -m prove_or_abstain.benchmark",
+  "note": "graph/agent are the 30 ground-truth scenarios (QWEN_MOCK=1 unless DASHSCOPE_API_KEY is set \u2014 reproduce with the command above). live_evals only populates with a real key.",
+  "graph": {
+    "mode": "graph",
+    "n": 30,
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "false_assert_rate": 0.0,
+    "false_abstain_rate": 0.0,
+    "records": [
+      {
+        "name": "seg_paid_hard",
+        "category": "clean_segment",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=paid",
+        "got_cause": "segment=paid",
+        "confidence": 1.0,
+        "correct": true
+      },
+      {
+        "name": "seg_paid_soft",
+        "category": "clean_segment",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=paid",
+        "got_cause": "segment=paid",
+        "confidence": 0.599,
+        "correct": true
+      },
+      {
+        "name": "seg_organic",
+        "category": "clean_segment",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=organic",
+        "got_cause": "segment=organic",
+        "confidence": 1.0,
+        "correct": true
+      },
+      {
+        "name": "seg_referral",
+        "category": "clean_segment",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=referral",
+        "got_cause": "segment=referral",
+        "confidence": 0.52,
+        "correct": true
+      },
+      {
+        "name": "seg_email",
+        "category": "clean_segment",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=email",
+        "got_cause": "segment=email",
+        "confidence": 0.82,
+        "correct": true
+      },
+      {
+        "name": "dev_mobile_hard",
+        "category": "clean_device",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "device=mobile",
+        "got_cause": "device=mobile",
+        "confidence": 1.0,
+        "correct": true
+      },
+      {
+        "name": "dev_mobile_soft",
+        "category": "clean_device",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "device=mobile",
+        "got_cause": "device=mobile",
+        "confidence": 0.897,
+        "correct": true
+      },
+      {
+        "name": "dev_desktop_hard",
+        "category": "clean_device",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "device=desktop",
+        "got_cause": "device=desktop",
+        "confidence": 1.0,
+        "correct": true
+      },
+      {
+        "name": "dev_desktop_soft",
+        "category": "clean_device",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "device=desktop",
+        "got_cause": "device=desktop",
+        "confidence": 1.0,
+        "correct": true
+      },
+      {
+        "name": "dev_mobile_mid",
+        "category": "clean_device",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "device=mobile",
+        "got_cause": "device=mobile",
+        "confidence": 1.0,
+        "correct": true
+      },
+      {
+        "name": "split_paid_organic",
+        "category": "clean_abstain",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "split_paid_referral",
+        "category": "clean_abstain",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "split_three",
+        "category": "clean_abstain",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "diffuse_0",
+        "category": "diffuse",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "diffuse_1",
+        "category": "diffuse",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "diffuse_2",
+        "category": "diffuse",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "diffuse_3",
+        "category": "diffuse",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "diffuse_4",
+        "category": "diffuse",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "mixshift_a",
+        "category": "mixshift",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "mixshift_b",
+        "category": "mixshift",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "mixshift_c",
+        "category": "mixshift",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "deep_paid_mobile",
+        "category": "deep",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "device=mobile",
+        "got_cause": "device=mobile",
+        "confidence": 0.409,
+        "correct": true
+      },
+      {
+        "name": "deep_organic_mobile",
+        "category": "deep",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "device=mobile",
+        "got_cause": "device=mobile",
+        "confidence": 0.783,
+        "correct": true
+      },
+      {
+        "name": "deep_paid_desktop",
+        "category": "deep",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "device=desktop",
+        "got_cause": "device=desktop",
+        "confidence": 0.409,
+        "correct": true
+      },
+      {
+        "name": "edge_revenue_sum",
+        "category": "edge",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=paid",
+        "got_cause": "segment=paid",
+        "confidence": 1.0,
+        "correct": true
+      },
+      {
+        "name": "edge_small_sample",
+        "category": "edge",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "edge_single_dim",
+        "category": "edge",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=paid",
+        "got_cause": "segment=paid",
+        "confidence": 1.0,
+        "correct": true
+      },
+      {
+        "name": "noisy_1",
+        "category": "noisy",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=paid",
+        "got_cause": "segment=paid",
+        "confidence": 0.518,
+        "correct": true
+      },
+      {
+        "name": "noisy_2",
+        "category": "noisy",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=paid",
+        "got_cause": "segment=paid",
+        "confidence": 0.775,
+        "correct": true
+      },
+      {
+        "name": "noisy_3",
+        "category": "noisy",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=organic",
+        "got_cause": "segment=organic",
+        "confidence": 0.831,
+        "correct": true
+      }
+    ]
+  },
+  "agent": {
+    "mode": "agent",
+    "n": 30,
+    "accuracy": 1.0,
+    "precision": 1.0,
+    "recall": 1.0,
+    "false_assert_rate": 0.0,
+    "false_abstain_rate": 0.0,
+    "records": [
+      {
+        "name": "seg_paid_hard",
+        "category": "clean_segment",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=paid",
+        "got_cause": "segment=paid",
+        "confidence": 1.0,
+        "correct": true
+      },
+      {
+        "name": "seg_paid_soft",
+        "category": "clean_segment",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=paid",
+        "got_cause": "segment=paid",
+        "confidence": 0.599,
+        "correct": true
+      },
+      {
+        "name": "seg_organic",
+        "category": "clean_segment",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=organic",
+        "got_cause": "segment=organic",
+        "confidence": 1.0,
+        "correct": true
+      },
+      {
+        "name": "seg_referral",
+        "category": "clean_segment",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=referral",
+        "got_cause": "segment=referral",
+        "confidence": 0.52,
+        "correct": true
+      },
+      {
+        "name": "seg_email",
+        "category": "clean_segment",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=email",
+        "got_cause": "segment=email",
+        "confidence": 0.82,
+        "correct": true
+      },
+      {
+        "name": "dev_mobile_hard",
+        "category": "clean_device",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "device=mobile",
+        "got_cause": "device=mobile",
+        "confidence": 1.0,
+        "correct": true
+      },
+      {
+        "name": "dev_mobile_soft",
+        "category": "clean_device",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "device=mobile",
+        "got_cause": "device=mobile",
+        "confidence": 0.897,
+        "correct": true
+      },
+      {
+        "name": "dev_desktop_hard",
+        "category": "clean_device",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "device=desktop",
+        "got_cause": "device=desktop",
+        "confidence": 1.0,
+        "correct": true
+      },
+      {
+        "name": "dev_desktop_soft",
+        "category": "clean_device",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "device=desktop",
+        "got_cause": "device=desktop",
+        "confidence": 1.0,
+        "correct": true
+      },
+      {
+        "name": "dev_mobile_mid",
+        "category": "clean_device",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "device=mobile",
+        "got_cause": "device=mobile",
+        "confidence": 1.0,
+        "correct": true
+      },
+      {
+        "name": "split_paid_organic",
+        "category": "clean_abstain",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "split_paid_referral",
+        "category": "clean_abstain",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "split_three",
+        "category": "clean_abstain",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "diffuse_0",
+        "category": "diffuse",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "diffuse_1",
+        "category": "diffuse",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "diffuse_2",
+        "category": "diffuse",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "diffuse_3",
+        "category": "diffuse",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "diffuse_4",
+        "category": "diffuse",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "mixshift_a",
+        "category": "mixshift",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "mixshift_b",
+        "category": "mixshift",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "mixshift_c",
+        "category": "mixshift",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "deep_paid_mobile",
+        "category": "deep",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "device=mobile",
+        "got_cause": "device=mobile",
+        "confidence": 0.409,
+        "correct": true
+      },
+      {
+        "name": "deep_organic_mobile",
+        "category": "deep",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "device=mobile",
+        "got_cause": "device=mobile",
+        "confidence": 0.783,
+        "correct": true
+      },
+      {
+        "name": "deep_paid_desktop",
+        "category": "deep",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "device=desktop",
+        "got_cause": "device=desktop",
+        "confidence": 0.409,
+        "correct": true
+      },
+      {
+        "name": "edge_revenue_sum",
+        "category": "edge",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=paid",
+        "got_cause": "segment=paid",
+        "confidence": 1.0,
+        "correct": true
+      },
+      {
+        "name": "edge_small_sample",
+        "category": "edge",
+        "expected": "ABSTAIN",
+        "got": "ABSTAIN",
+        "expected_cause": null,
+        "got_cause": null,
+        "confidence": 0.0,
+        "correct": true
+      },
+      {
+        "name": "edge_single_dim",
+        "category": "edge",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=paid",
+        "got_cause": "segment=paid",
+        "confidence": 1.0,
+        "correct": true
+      },
+      {
+        "name": "noisy_1",
+        "category": "noisy",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=paid",
+        "got_cause": "segment=paid",
+        "confidence": 0.518,
+        "correct": true
+      },
+      {
+        "name": "noisy_2",
+        "category": "noisy",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=paid",
+        "got_cause": "segment=paid",
+        "confidence": 0.775,
+        "correct": true
+      },
+      {
+        "name": "noisy_3",
+        "category": "noisy",
+        "expected": "ASSERT",
+        "got": "ASSERT",
+        "expected_cause": "segment=organic",
+        "got_cause": "segment=organic",
+        "confidence": 0.831,
+        "correct": true
+      }
+    ]
+  },
+  "live_evals": {
+    "skipped": "needs DASHSCOPE_API_KEY (and QWEN_MOCK unset)"
+  }
+}

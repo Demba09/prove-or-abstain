@@ -23,19 +23,32 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import logging
+import os
 from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 
 import pandas as pd
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 load_dotenv()
 
-from prove_or_abstain import ingest, memory
+# webhook.py/monitor.py log through the standard `logging` module (not
+# print()) so output is level-filterable and can be redirected the normal
+# way — but without a handler configured, Python's root logger drops
+# anything below WARNING by default. This is the process's one entry point
+# (Dockerfile's CMD runs uvicorn against this module), so it's the right
+# place to configure it once for the whole app.
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
+from prove_or_abstain import ingest, memory, ratelimit, reference
 from prove_or_abstain.agent_loop import investigate_agentic
 from prove_or_abstain.autopilot import get_dashboard, record_check, resolve_execution, get_executions
 from prove_or_abstain.connectors.gsheets import SheetError
@@ -49,6 +62,23 @@ from prove_or_abstain.panels import (BASELINE, CLEAN, DEEP, DIFFUSE, MIXSHIFT,
 # docs_url=None frees /docs from the built-in Swagger route so the
 # redirect below can point it at ReDoc instead.
 app = FastAPI(title="prove-or-abstain", version="0.4.0", docs_url=None)
+
+
+@app.middleware("http")
+async def _rate_limit(request: Request, call_next):
+    """Applies to every route except /health (so a container/LB health
+    probe is never the thing that trips the limit). See ratelimit.py for
+    what this is and, just as importantly, what it isn't."""
+    if request.url.path == "/health":
+        return await call_next(request)
+    fwd = request.headers.get("x-forwarded-for")
+    client_id = (fwd.split(",")[0].strip() if fwd
+                else (request.client.host if request.client else "unknown"))
+    if not ratelimit.allow(client_id):
+        return JSONResponse(
+            {"detail": f"rate limit exceeded ({ratelimit.LIMIT_PER_MINUTE}/min) — try again shortly"},
+            status_code=429)
+    return await call_next(request)
 
 # The four demo panels: CLEAN/DEEP -> ASSERT, DIFFUSE/MIXSHIFT -> ABSTAIN.
 _PANELS = {"clean": CLEAN, "diffuse": DIFFUSE, "mixshift": MIXSHIFT, "deep": DEEP}
@@ -89,6 +119,11 @@ class QueryRequest(BaseModel):
     # to ask a follow-up in the same conversation ("and on mobile only?")
     # instead of re-routing from scratch.
     previous_panel: Literal["clean", "diffuse", "mixshift", "deep"] | None = None
+    # Set this instead of previous_panel to ask about a "Watch a source" id
+    # (POST /sources/{id}/observe) rather than one of the 4 built-in panels —
+    # there's exactly one dataset in play, so Qwen only extracts a filter,
+    # it doesn't route. Needs >= 2 observations already recorded for the id.
+    source_id: str | None = None
 
 
 class SqlRequest(BaseModel):
@@ -206,9 +241,15 @@ def investigate_query(req: QueryRequest) -> dict:
     SELECT a (dim, segment) filter from the panel's known values (never
     invents one), and the same panel is filtered to it before re-running the
     unchanged pipeline. A single stateless call: the caller carries the
-    conversation, not the server."""
+    conversation, not the server.
+
+    Pass `source_id` instead of `previous_panel` to ask about a "Watch a
+    source" id (see _query_source) — there's one active dataset, not 4
+    named panels, so only the filter half of routing applies."""
     if not req.query.strip():
         raise HTTPException(400, "query must not be empty")
+    if req.source_id:
+        return _query_source(req)
     routed = get_client().route_query(req.query, _PANEL_DESCRIPTIONS, _METRICS,
                                       dims=_DIM_VALUES, previous_panel=req.previous_panel)
     base, curr = BASELINE, _PANELS[routed["panel"]]
@@ -223,6 +264,39 @@ def investigate_query(req: QueryRequest) -> dict:
         autopilot=req.autopilot,
     )
     return {"panel": routed["panel"], "routing": routed, **result}
+
+
+def _query_source(req: QueryRequest) -> dict:
+    """Ask a free-text question about a "Watch a source" id: re-run the
+    same comparison /sources/{id}/observe would have made for the latest
+    observation (pooled prior observations vs. the latest one), optionally
+    narrowed to a (dim, segment) Qwen extracts from the text. Needs >= 2
+    recorded observations — with only 1 (cold start), there's nothing yet
+    to compare, same as the /observe endpoint itself."""
+    observations = memory.get_observations(req.source_id)
+    if len(observations) < 2:
+        raise HTTPException(
+            400, f"source {req.source_id!r} has {len(observations)} observation(s) "
+                f"— send at least one more before asking a question about it")
+    dims = observations[-1]["dims"]
+    dim_values = {d: sorted(set(pd.concat([o["panel"] for o in observations])[d].dropna()))
+                 for d in dims}
+    filt = get_client().extract_filter(req.query, dim_values)
+
+    base = reference.pool_observations(observations[:-1])
+    curr = observations[-1]["panel"]
+    if filt:
+        base = base[base[filt["dim"]] == filt["segment"]]
+        curr = curr[curr[filt["dim"]] == filt["segment"]]
+
+    result = _run_investigation(
+        base, curr,
+        metrics=observations[-1]["metrics"],
+        dims=dims,
+        autopilot=req.autopilot,
+    )
+    routing = {"source_id": req.source_id, "filter": filt}
+    return {"source_id": req.source_id, "routing": routing, **result}
 
 
 @app.post("/investigate/suggest")

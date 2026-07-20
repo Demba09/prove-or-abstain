@@ -109,8 +109,8 @@ def _abstain_report(dim: str) -> GateReport:
     return GateReport(
         verdict="ABSTAIN", confidence=0.0, leading_segment=None,
         concentration=0.0, interaction_share=0.0, leading_sample_n=0.0,
-        leading_z=float("nan"), leading_p=float("nan"), delta_R_relative=0.0,
-        reasons=["tool_error"], subscores={})
+        leading_z=float("nan"), leading_p=float("nan"), significant=False,
+        delta_R_relative=0.0, reasons=["tool_error"], subscores={})
 
 
 def _emit_gate(emit, state, reports, dim: str) -> None:

@@ -39,6 +39,23 @@ your business segments and returns one of two verdicts:
 have a principled way to refuse to act when evidence is insufficient. Without it,
 the agent will always fabricate a plausible-sounding diagnosis — right or wrong.
 
+## Built for the Qwen Cloud Hackathon — Track 4: Autopilot Agent
+
+| Requirement | Implementation |
+|-------------|----------------|
+| **Handle ambiguous inputs** | `/investigate/query` routes free-text questions; `map_schema()` reshapes an unfamiliar raw source's columns for "Watch a source" |
+| **Qwen orchestrates via tool calls** | `mode="agent"` (toggle in the demo) — Qwen drives the investigation through function calling (`agent_loop.py`), math still decides |
+| **Invoke external tools** | SQL connector, Google Sheets connector, CSV upload, time series, continuous source ingestion |
+| **Continuous autonomy** | `monitor.py` watches sources, investigates on movement, persists a durable baseline, alerts |
+| **Human-in-the-loop checkpoints** | ABSTAIN always escalates; autopilot requires confidence ≥ 0.70 to execute; alerts resolvable |
+| **Provable, not just a demo** | 30-scenario benchmark (100%, 0% false-ASSERT) plus 3 real external datasets, ECE calibration, reproducible audit trails, per-request cost |
+| **Production-ready** | Docker, CI, 95 tests, SQLite persistence, SSE streaming, API docs at `/docs` (ReDoc) |
+
+Qwen (via DashScope) orders dimensions, phrases reports, routes questions, and — the one
+deliberate exception — maps an unfamiliar source's columns. Everywhere else the math decides,
+verdict-identical with or without the LLM (`QWEN_MOCK=1` proves it). Details in
+[Where Qwen actually earns its keep](#where-qwen-actually-earns-its-keep).
+
 ---
 
 ## Real-world walkthrough
@@ -85,8 +102,10 @@ QWEN_MOCK=1 uvicorn api.app:app --reload
 ```
 
 The demo page lets you run the 4 built-in scenarios (clean, diffuse, mixshift, deep),
-ask questions in plain English, or plug in your own data — CSV upload, SQL database query,
-Google Sheets.
+watch a source with no baseline file, or ask questions in plain English about whichever you
+last ran. A **graph / agent** toggle switches between the fixed pipeline and Qwen orchestrating
+the investigation via tool calls — the trace of its calls shows below the verdict, and the
+verdict is identical either way. (CSV/SQL/Sheets upload also available — see the API table.)
 
 ![architecture](docs/architecture.svg)
 
@@ -104,10 +123,10 @@ The agent is a LangGraph state machine with seven nodes and one conditional loop
 | actuator | maps the verdict to a typed action: recommend, execute, or escalate |
 | reporter | writes the conclusion and keeps the full audit trail |
 
-**Division of labour:** All numbers come from pandas/numpy. The LLM (Qwen via DashScope)
-does three things only: suggests the order of dimensions, writes the report from computed
-figures, and — on ASSERT — offers business hypotheses explicitly labelled as speculation.
-It never produces a number and never decides a verdict.
+**Division of labour:** All numbers come from pandas/numpy. Qwen (via DashScope) orders
+dimensions, phrases the report, routes questions, and offers labelled speculation — never a
+number, never a verdict. The one place its judgment can change an outcome (`map_schema()`) is
+called out explicitly below.
 
 ### Two orchestration modes
 
@@ -119,13 +138,20 @@ It never produces a number and never decides a verdict.
   function calling and decides which dimension to test, in what order, and when
   to stop. The response carries an `agent_trace` of every tool call it made.
 
-Crucially, **both modes return the identical verdict.** The tools run the same
-gate math, and a determinism guard guarantees the LLM can never change the
-outcome — if Qwen skips a dimension or finalizes early, every untested
-dimension is checked deterministically before concluding, so a lazy or
-divergent model can never cause a false ABSTAIN. Qwen drives the *path*; the
-math decides the *verdict*. Offline (`QWEN_MOCK=1` or no key), the loop is
-replayed deterministically and reproduces the graph exactly.
+Crucially, **both modes return the identical ASSERT/ABSTAIN verdict.** The tools
+run the same gate math, and a determinism guard guarantees the LLM can never
+turn a real cause into a false ABSTAIN by skipping a dimension or finalizing
+early — every untested dimension is checked deterministically before
+concluding. Offline (`QWEN_MOCK=1` or no key), the loop is replayed
+deterministically and reproduces the graph exactly.
+
+**One honest nuance, found by running this against a live key:** when a
+single narrow cell collapses (the `deep` scenario), it concentrates 100% on
+*both* of its defining dimensions at once. Qwen's test order then decides
+which is the top-level `root_cause` and which is the `drilldown.refined`
+detail — but the drill-down always recovers the other, so the full
+diagnosis is never lost, only relabelled. The benchmark below credits a
+match on either field for this reason.
 
 ### Where Qwen actually earns its keep
 
@@ -144,7 +170,10 @@ narrow that gap to where an LLM beats a fixed rule outright:
 - **Conversational follow-up** — `POST /investigate/query` accepts
   `previous_panel` plus a follow-up like *"and on mobile only?"*: Qwen may
   select a `(dim, segment)` filter from values it's given (never invents
-  one) and the pipeline re-runs, filtered.
+  one) and the pipeline re-runs, filtered. Pass `source_id` instead to ask
+  the same kind of question about a **"Watch a source"** id — there's one
+  active dataset there, not 4 named panels, so `extract_filter()` only
+  does the filter half of routing (`llm.py`'s `route_query()` docstring).
 - **Evidence-grounded speculation** (`prove_or_abstain/evidence.py`) — on
   ASSERT, `speculate_causes()` is handed any operational events already
   logged for the winning segment and grounds a hypothesis in the most
@@ -194,7 +223,10 @@ anything lower downgrades to RECOMMEND. Every EXECUTE is recorded in the audit t
 30 synthetic scenarios with **known ground truth derived from how each panel is
 generated** (a paid-only collapse ⇒ `ASSERT segment=paid`; a uniform drop ⇒
 `ABSTAIN`) — never from the pipeline's own output, so accuracy is not circular.
-Run it yourself, offline, in ~2 seconds:
+Run it yourself, offline, in ~2 seconds — it also writes
+[`benchmark_results.json`](benchmark_results.json), a committed, inspectable
+record of the actual run (timestamp, every scenario, every field below),
+not just a hand-written summary table:
 
 ```bash
 python -m prove_or_abstain.benchmark
@@ -220,14 +252,11 @@ Qwen's orchestration can't change a verdict. The critical number is
 **false-ABSTAIN = 0% paired with false-ASSERT = 0%**: the agent never misses a
 real, localizable cause, and never invents one that isn't there.
 
-**What this 100% proves, and what it doesn't.** Every scenario here is
-constructed clearly on one side of the 4 gate thresholds (`MATERIAL_REL`,
-`CONCENTRATION_MIN`, `SIGNIFICANCE_ALPHA`, `INTERACTION_MAX` in
-`gates.py`) — none sits at the exact boundary. So 100% is solid evidence the
-code correctly implements its own documented rules (a regression test, and
-a real one), not evidence of correct behaviour on genuinely ambiguous real
-data or right at a threshold. That's what "Tested against real data" below
-is for.
+**What this 100% proves, and what it doesn't.** Every scenario is built
+clearly on one side of the 4 gate thresholds — none sits at the exact
+boundary. So 100% proves the code correctly implements its own documented
+rules (a real regression test), not correct behaviour on genuinely
+ambiguous data. That's what "Tested against real data" below is for.
 
 ### vs. a raw LLM
 
@@ -246,9 +275,9 @@ DASHSCOPE_API_KEY=sk-... python -m prove_or_abstain.benchmark
 ## Tested against real data, not just planted scenarios
 
 Every scenario above is synthetic by necessity — ground truth has to be
-known in advance to grade accuracy. As an external sanity check, two public,
-real (not invented) datasets go through the same pipeline, committed in
-`examples/` and pinned by tests so CI catches any drift:
+known in advance to grade accuracy. As an external sanity check, three
+public, real (not invented) datasets go through the same pipeline,
+committed in `examples/` and pinned by tests so CI catches any drift:
 
 - **`examples/real_flights_series.csv`** — [seaborn-data's `flights.csv`](https://github.com/mwaskom/seaborn-data),
   real monthly airline passenger counts, 1949–1960. 1960 grew **+11.2%**
@@ -272,25 +301,47 @@ real (not invented) datasets go through the same pipeline, committed in
   curl -X POST localhost:8000/investigate/upload \
     -F baseline=@examples/real_titanic_southampton.csv -F current=@examples/real_titanic_cherbourg.csv
   ```
+- **`examples/real_majors_nonstem.csv` / `_stem.csv`** — [fivethirtyeight's
+  `college-majors`](https://github.com/fivethirtyeight/data/tree/master/college-majors)
+  `recent-grads.csv`, 173 real US majors with real employment counts. STEM
+  majors (the dataset's own classification, not one we picked) employ at
+  75.0% vs. 81.0% for everything else — and that gap is **not** uniform: it
+  concentrates in majority-women majors (81.5% → 68.8%) far more than
+  majority-men ones (79.9% → 79.2%), a real, un-planted finding with
+  genuinely low confidence, correctly staying a `RECOMMEND`.
+  ```bash
+  curl -X POST localhost:8000/investigate/upload \
+    -F baseline=@examples/real_majors_nonstem.csv -F current=@examples/real_majors_stem.csv
+  ```
+  The same data also exists as `_raw.csv`, with plausible, unrenamed column
+  names (`Field`, `Group`, `Total`, `Employed`) instead of `metric`/`n`/`c` —
+  sent through `POST /sources/{id}/observe` ("Watch a source", below) so it
+  has to go through `map_schema()` for real. See point 2 just below for what
+  that actually proves.
 
-Two honest limits on what these two prove:
+Two honest limits on what these three prove:
 
 1. **Deliberately not folded into the 100% above.** The 30 synthetic
    scenarios have ground truth written *before* any run, derived from how
-   the panel was built. For these two, the "expected" outcome was
+   the panel was built. For these three, the "expected" outcome was
    determined by running the pipeline and documenting what came out — not
    an independently-established truth checked beforehand. Counting them
    into `run_benchmark()`'s accuracy would reintroduce exactly the
-   circularity the benchmark otherwise avoids, so they stay two separate
-   tests, never part of the 30/30.
-2. **They don't test Qwen's reliability.** Both CSVs sent to the API are
-   already in the clean long-panel shape (`metric`, `n`, `c`) — reshaped by
-   hand before upload. `map_schema()` (the one place Qwen's decision can
-   change a verdict) never runs on either. These validate the deterministic
-   math against real-world noise, not Qwen's judgment on genuinely
-   ambiguous raw columns — that would need a real source with truly unusual
-   column names (not renamed by us) and a live DashScope key, neither of
-   which is available in every environment this runs in.
+   circularity the benchmark otherwise avoids, so they stay separate tests,
+   never part of the 30/30.
+2. **Only the college-majors `_raw.csv` variant tests Qwen's judgment.**
+   Flights and Titanic arrive already in the clean `metric`/`n`/`c` shape, so
+   `map_schema()` never runs — they exercise the math against real noise, not
+   the LLM. The `_raw.csv` columns (`Field`, `Group`, `Total`, `Employed`)
+   genuinely defeat the deterministic mock heuristic (a test asserts it
+   `400`s), so mapping them is a fair test of judgment. We've verified the
+   verdict is correct *once mapped*; confirming Qwen maps it live needs a real
+   key:
+   ```bash
+   DASHSCOPE_API_KEY=sk-... curl -X POST localhost:8000/sources/majors/observe -F panel=@examples/real_majors_nonstem_raw.csv
+   DASHSCOPE_API_KEY=sk-... curl -X POST localhost:8000/sources/majors/observe -F panel=@examples/real_majors_stem_raw.csv
+   # expect the 2nd call: ASSERT / Group=majority_women — same finding as the pre-renamed CSVs
+   ```
 
 ## Calibration
 
@@ -359,8 +410,8 @@ prove_or_abstain/   core package — the deterministic pipeline
 api/                deployment entry point — FastAPI app + static demo page (SSE stream)
 mcp_server.py       MCP entry point for Qwen Cloud agents
 scripts/            validation & demo tooling (see below)
-tests/              pytest suite (88 tests, runs offline with QWEN_MOCK=1)
-examples/           sample CSVs — synthetic (planted ground truth) + 2 real public datasets
+tests/              pytest suite (95 tests, runs offline with QWEN_MOCK=1)
+examples/           sample CSVs — synthetic (planted ground truth) + 3 real public datasets
 docs/               architecture diagram, demo script, devpost text
 ```
 
@@ -374,6 +425,9 @@ pip install -r requirements.txt
 QWEN_MOCK=1 pytest -q
 QWEN_MOCK=1 uvicorn api.app:app --reload
 ```
+
+The package itself is pip-installable (`pip install -e .`, via `pyproject.toml`) —
+`requirements.txt` stays the pinned source of truth CI/Docker both build from.
 
 ### Configuration
 
@@ -412,6 +466,7 @@ GET  /                     demo page
 POST /investigate          built-in scenario: { "panel": "clean" | "diffuse" | "mixshift" | "deep", "autopilot": false, "mode": "graph" | "agent" }
 GET  /investigate/stream   Server-Sent Events: stream the investigation step by step (?panel=&autopilot=)
 POST /investigate/query    natural language: { "query": "why did conversion drop?", "previous_panel": "clean" }
+                           or, about a watched source instead: { "query": "...", "source_id": "my-dashboard-metric" }
 POST /investigate/suggest  setup helper: upload a sample CSV, get back sum-vs-rate metric classification
 POST /investigate/upload   CSV upload (multipart: baseline + current)
 POST /investigate/sql      live database: { "dsn": "...", "baseline_query": "...", "current_query": "..." }
@@ -426,6 +481,11 @@ GET  /executions           audit trail of all EXECUTE actions
 POST /executions/{id}/resolve  human resolves an active alert
 GET  /health               healthcheck
 ```
+
+Every route except `/health` is rate-limited (default 60 req/min per client
+IP, `RATE_LIMIT_PER_MINUTE` env var — see `prove_or_abstain/ratelimit.py`
+for what this is: a single-instance in-memory guard, not a distributed one).
+Over the limit returns `429`.
 
 Two distinct ways to feed it data: **compare two snapshots** yourself
 (`/investigate*` above — a one-off "last month vs this month"), or **watch a
@@ -550,8 +610,14 @@ docker build -t prove-or-abstain .
 docker run -p 8000:8000 -e DASHSCOPE_API_KEY=... prove-or-abstain
 ```
 
+Runs as a non-root user (`appuser`, uid 10001) — the process only serves
+HTTP on an unprivileged port and needs no elevated access.
+
 For Alibaba Cloud: push to Container Registry, run on Function Compute (port 8000).
-`/health` serves as the probe endpoint.
+`/health` serves as the probe endpoint. **Honest status of this specific
+claim** — what's actually been run and verified vs. what's documented but
+not yet executed — is in
+[`docs/deployment_verification.md`](docs/deployment_verification.md).
 
 ## Qwen Cloud MCP Server
 
@@ -583,23 +649,6 @@ With MCP, a Qwen agent:
 5. Generates a human-readable response with recommendations
 
 **Qwen is now the agent. Prove-or-Abstain is its skill.**
-
-## Built for the Qwen Cloud Hackathon — Track 4: Autopilot Agent
-
-| Requirement | Implementation |
-|-------------|----------------|
-| **Handle ambiguous inputs** | `/investigate/query` — Qwen routes free-text questions to the right scenario |
-| **Qwen orchestrates via tool calls** | `mode="agent"` — Qwen drives the investigation through function calling (`agent_loop.py`), math still decides |
-| **Invoke external tools** | SQL connector, Google Sheets connector, CSV upload, time series |
-| **Continuous autonomy** | `monitor.py` watches sources, investigates on movement, persists + alerts |
-| **Human-in-the-loop checkpoints** | ABSTAIN always escalates; autopilot requires confidence ≥ 0.70 to execute; alerts resolvable |
-| **Provable, not just a demo** | 30-scenario benchmark (100%, 0% false-ASSERT), ECE calibration, reproducible audit trails, per-request cost |
-| **Production-ready** | Docker, CI, 90 tests, SQLite persistence, SSE streaming, API docs at `/docs` (ReDoc) |
-
-**Qwen Cloud integration:** `prove_or_abstain/llm.py` calls Qwen via DashScope for dimension ordering,
-report phrasing, and query routing only. The math (pandas, numpy) and statistics
-(z-test, p ≤ 0.01) run independently. The verdict is **identical** with or without the LLM — 
-`QWEN_MOCK=1` proves this.
 
 ## What's next
 

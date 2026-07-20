@@ -13,6 +13,9 @@ import os
 os.environ["QWEN_MOCK"] = "1"   # before any import that instantiates the LLM client
 os.environ.setdefault("PROBATIO_DB", ":memory:")   # never touch disk in tests
 
+import json
+import math
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -38,6 +41,18 @@ SCENARIOS = {"CLEAN": REF_CLEAN, "DIFFUSE": REF_DIFFUSE, "MIXSHIFT": REF_MIXSHIF
 EXPECTED = {"CLEAN": "ASSERT", "DIFFUSE": "ABSTAIN", "MIXSHIFT": "ABSTAIN"}
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limit():
+    """Every test shares one TestClient/client_id, so without a reset the
+    rate-limit middleware's global counter accumulates across the whole
+    suite (100+ HTTP calls total) and starts 429ing unrelated tests partway
+    through a run. Real usage doesn't have this problem — it's an artifact
+    of one process serving the entire test suite as if it were one client."""
+    from prove_or_abstain import ratelimit
+    ratelimit.reset()
+    yield
 
 
 # -------------------------------------------------------------------- math
@@ -260,6 +275,33 @@ def test_clean_panel_does_not_refine():
     assert body["drilldown"]["refined"] is None
 
 
+def test_deep_panel_root_cause_and_refined_swap_with_dimension_order():
+    """A single-cell collapse (paid x mobile) concentrates 100% on BOTH its
+    defining dimensions -- mathematically inevitable, not a calibration
+    quirk (found via a real, non-mock Qwen run that happened to order
+    dimensions differently than the mock default and got marked "wrong" by
+    the benchmark before this was understood). Whichever dimension is
+    tested first becomes the top-level root_cause; the driller always finds
+    the OTHER one as `refined` -- so the full (paid, mobile) diagnosis is
+    recovered either way. Only the top-level/refined labelling depends on
+    order, never whether a cause is found or which cell it points to."""
+    from prove_or_abstain.panels import BASELINE
+    from prove_or_abstain.benchmark import _deep
+    from prove_or_abstain.graph import APP
+
+    curr = _deep("paid", "mobile", 0.03)
+    state = {"baseline": BASELINE, "current": curr,
+             "metrics": ["conversion", "activation"], "metric_kinds": {},
+             "dims": ["segment", "device"],  # segment tested BEFORE device
+             "autopilot_enabled": False, "trace": []}
+    final = APP.invoke(state)
+    assert final["verdict"] == "ASSERT"
+    assert final["winning_dim"] == "segment"
+    assert final["winning_report"].leading_segment == "paid"
+    refined = final["drilldown"]["refined"]
+    assert refined["dim"] == "device" and refined["segment"] == "mobile"
+
+
 def test_abstain_has_no_drilldown():
     body = client.post("/investigate", json={"panel": "diffuse"}).json()
     assert body["drilldown"] is None
@@ -375,6 +417,43 @@ def test_guard_filter_rejects_values_outside_the_supplied_dims():
     assert _guard_filter({"dim": "country", "segment": "france"}, dims) is None
     assert _guard_filter(None, dims) is None
     assert _guard_filter({"dim": "segment", "segment": "paid"}, None) is None
+
+
+# --------------------------------------------- "ask" against a watched source
+def test_query_source_needs_two_observations():
+    from prove_or_abstain import memory
+    memory.reset()
+    r = client.post("/investigate/query", json={"query": "why?", "source_id": "onlyone"})
+    assert r.status_code == 400   # no observations at all yet
+
+    df = pd.DataFrame({"metric": ["conversion"], "segment": ["paid"], "n": [100], "c": [10]})
+    client.post("/sources/onlyone/observe", files={"panel": ("p.csv", _csv(df), "text/csv")})
+    r = client.post("/investigate/query", json={"query": "why?", "source_id": "onlyone"})
+    assert r.status_code == 400   # cold start only — nothing to compare against yet
+
+
+def test_query_source_filters_to_named_segment_via_examples():
+    """Reuses the real STEM/gender-majority finding (see the real-data tests
+    below) to prove "ask" can narrow an already-watched source to a segment
+    Qwen extracts from free text — same guarded mechanism as previous_panel,
+    just against one persisted dataset instead of 4 named ones."""
+    from pathlib import Path
+    from prove_or_abstain import memory
+    root = Path(__file__).resolve().parent.parent / "examples"
+    memory.reset()
+    client.post("/sources/majors_ask/observe",
+               files={"panel": ("nonstem.csv", (root / "real_majors_nonstem.csv").read_bytes(), "text/csv")})
+    unfiltered = client.post("/sources/majors_ask/observe",
+               files={"panel": ("stem.csv", (root / "real_majors_stem.csv").read_bytes(), "text/csv")}).json()
+
+    filtered = client.post("/investigate/query", json={
+        "query": "what about majority_women?", "source_id": "majors_ask",
+    }).json()
+    assert filtered["routing"]["filter"] == {"dim": "gender_majority", "segment": "majority_women"}
+    # only one segment left in the filtered data, so it trivially IS 100% of
+    # the move — unlike the unfiltered comparison's genuinely uncertain 0.01
+    assert filtered["gates"]["gender_majority"]["concentration"] == 1.0
+    assert unfiltered["gates"]["gender_majority"]["confidence"] < 0.1
 
 
 # ------------------------------------------------------------- setup suggestion
@@ -536,6 +615,87 @@ def test_sql_connector_rejects_stacked_statements(tmp_path):
         "dsn": dsn, "baseline_query": "SELECT 1; DROP TABLE sqlite_master", "current_query": "SELECT 1",
     })
     assert r.status_code == 400
+
+
+def test_sql_guard_allows_semicolon_inside_a_string_literal():
+    """A bare "';' in query" check would reject a single, legitimate
+    statement that happens to contain a semicolon inside a WHERE literal —
+    a false positive, not a safety win. The guard strips string literals
+    before counting ';', so this must pass."""
+    from prove_or_abstain.connectors.sql import _guard_single_select
+    _guard_single_select("SELECT metric, n, c FROM t WHERE note = 'a; b'")  # no raise
+    _guard_single_select('SELECT metric, n, c FROM t WHERE note = "a; b"')  # no raise
+    _guard_single_select("SELECT metric, n, c FROM t WHERE note = 'it''s; ok'")  # escaped quote
+
+
+def test_sql_guard_still_rejects_a_real_second_statement():
+    from prove_or_abstain.connectors.sql import SqlQueryError, _guard_single_select
+    with pytest.raises(SqlQueryError):
+        _guard_single_select("SELECT 1; DROP TABLE t")
+    with pytest.raises(SqlQueryError):
+        # a semicolon after a closed literal is a real second statement
+        _guard_single_select("SELECT * FROM t WHERE note = 'a'; DROP TABLE t")
+
+
+# --------------------------------------------------------------- rate limit
+def test_ratelimit_allows_under_limit_and_blocks_over(monkeypatch):
+    from prove_or_abstain import ratelimit
+    monkeypatch.setattr(ratelimit, "LIMIT_PER_MINUTE", 3)
+    ratelimit.reset()
+    assert ratelimit.allow("client-a") is True
+    assert ratelimit.allow("client-a") is True
+    assert ratelimit.allow("client-a") is True
+    assert ratelimit.allow("client-a") is False             # 4th within the window: blocked
+    assert ratelimit.allow("client-b") is True               # separate client, separate bucket
+
+
+def test_ratelimit_middleware_429s_and_exempts_health(monkeypatch):
+    from prove_or_abstain import ratelimit
+    monkeypatch.setattr(ratelimit, "LIMIT_PER_MINUTE", 2)
+    ratelimit.reset()
+    for _ in range(5):
+        assert client.get("/health").status_code == 200      # /health is exempt, never blocked
+
+    assert client.get("/panels/clean").status_code == 200    # 1st normal call
+    assert client.get("/panels/clean").status_code == 200    # 2nd
+    r = client.get("/panels/clean")                          # 3rd: over the limit of 2
+    assert r.status_code == 429
+    assert "rate limit" in r.json()["detail"]
+
+
+# ---------------------------------------------------------------- webhook
+def test_webhook_notify_without_url_logs_and_returns_false(monkeypatch, caplog):
+    from prove_or_abstain import webhook
+    monkeypatch.delenv("WEBHOOK_URL", raising=False)
+    with caplog.at_level("INFO", logger="prove_or_abstain.webhook"):
+        sent = webhook.notify("conversion", "ASSERT", 0.79, "segment=paid",
+                              "EXECUTE", "pause the paid campaign")
+    assert sent is False
+    assert "no WEBHOOK_URL set" in caplog.text
+    assert "segment=paid" in caplog.text          # the payload itself was logged
+
+
+def test_webhook_notify_posts_to_slack_shaped_url(monkeypatch):
+    from prove_or_abstain import webhook
+    monkeypatch.setenv("WEBHOOK_URL", "https://hooks.slack.com/services/x/y/z")
+    posted = {}
+
+    class _FakeResp:
+        status_code = 200
+
+    class _FakeRequests:
+        RequestException = Exception
+        @staticmethod
+        def post(url, json, timeout):
+            posted["url"], posted["json"] = url, json
+            return _FakeResp()
+
+    monkeypatch.setattr(webhook, "requests", _FakeRequests)
+    sent = webhook.notify("conversion", "ASSERT", 0.79, "segment=paid",
+                          "EXECUTE", "pause the paid campaign")
+    assert sent is True
+    assert posted["url"] == "https://hooks.slack.com/services/x/y/z"
+    assert "attachments" in posted["json"]          # Slack-shaped payload
 
 
 # ----------------------------------------------------------- Google Sheets
@@ -745,6 +905,33 @@ def test_autopilot_adapter_survives_on_memory():
     assert dash.active_alerts[0]["detail"] == "pause"
 
 
+def test_record_check_thread_safe_counter(monkeypatch):
+    """/investigate/check runs record_check() on a sync endpoint, so
+    concurrent calls are genuinely possible under FastAPI's thread pool.
+    _TOTAL_CHECKS += 1 is a read-modify-write; without a lock, concurrent
+    increments can race and undercount."""
+    import threading
+    from prove_or_abstain import autopilot
+    monkeypatch.setattr(autopilot, "_TOTAL_CHECKS", 0)
+    monkeypatch.setattr(autopilot, "_LAST_CHECK", None)
+    monkeypatch.setattr(autopilot, "_LAST_VERDICT", None)
+
+    n = 50
+    barrier = threading.Barrier(n)
+
+    def hit():
+        barrier.wait()
+        autopilot.record_check("ASSERT")
+
+    threads = [threading.Thread(target=hit) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert autopilot.get_dashboard().total_checks == n   # no increment lost
+
+
 # --------------------------------------------------------- benchmark harness
 
 def test_benchmark_high_accuracy_offline():
@@ -756,6 +943,19 @@ def test_benchmark_high_accuracy_offline():
         assert m["accuracy"] >= 0.9, [r for r in m["records"] if not r["correct"]]
         assert m["false_abstain_rate"] == 0.0     # never miss a real cause
         assert all("confidence" in r for r in m["records"])  # feeds calibration
+
+
+def test_benchmark_writes_inspectable_json(tmp_path):
+    from prove_or_abstain.benchmark import _write_results_json, run_benchmark
+    graph_m = run_benchmark("graph", verbose=False)
+    agent_m = run_benchmark("agent", verbose=False)
+    live_evals = {"skipped": "needs DASHSCOPE_API_KEY (and QWEN_MOCK unset)"}
+    out = _write_results_json(graph_m, agent_m, live_evals, path=tmp_path / "benchmark_results.json")
+    assert out.exists()
+    payload = json.loads(out.read_text())
+    assert payload["graph"]["n"] == 30 and payload["agent"]["n"] == 30
+    assert payload["live_evals"] == live_evals
+    assert "generated_at" in payload
 
 
 # ----------------------------------------------------- autonomous monitor
@@ -923,6 +1123,34 @@ def test_map_schema_never_invents_a_column_name():
     assert set(out["dim_columns"]) == {"category"}
 
 
+def test_get_client_is_thread_safe(monkeypatch):
+    """FastAPI runs sync endpoints in a thread pool, so concurrent requests
+    can hit get_client()'s check-then-set on the very first call at once.
+    Without a lock, two threads can each see _CLIENT is None and both
+    construct a QwenClient, silently discarding one's cost tracker. A
+    Barrier maximizes the chance every thread reads _CLIENT as None at the
+    same instant, which is exactly the window the lock closes."""
+    import threading
+    from prove_or_abstain import llm
+    monkeypatch.setattr(llm, "_CLIENT", None)
+
+    n = 25
+    barrier = threading.Barrier(n)
+    results = [None] * n
+
+    def grab(i):
+        barrier.wait()
+        results[i] = llm.get_client()
+
+    threads = [threading.Thread(target=grab, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len({id(r) for r in results}) == 1               # every thread got the SAME instance
+
+
 def test_map_schema_mock_identifies_standard_columns():
     from prove_or_abstain.llm import template_map_schema
     cols = ["metric", "category", "platform", "total_users", "total_conversions"]
@@ -1004,10 +1232,11 @@ def test_schema_mapping_end_to_end_via_examples(tmp_path):
 # Every other example in examples/ is hand-constructed with a known, planted
 # cause — necessary to prove the math against a ground truth, but every
 # scenario ends up suspiciously round (n in the thousands, a 7%->5% drop
-# reused verbatim in more than one place). These two are real public
-# datasets (seaborn-data's flights.csv and titanic.csv, MIT-licensed),
-# reshaped into the long-panel contract but with none of the numbers
-# invented: real group sizes (7 to 353), real noise, no planted answer.
+# reused verbatim in more than one place). These three are real public
+# datasets (seaborn-data's flights.csv and titanic.csv, MIT-licensed;
+# fivethirtyeight/data's recent-grads.csv, CC BY 4.0), reshaped into the
+# long-panel contract but with none of the numbers invented: real group
+# sizes (7 to 3.5M), real noise, no planted answer.
 
 def test_real_flights_1960_growth_is_systemic_not_seasonal():
     """seaborn-data/flights.csv: real monthly airline passenger counts,
@@ -1049,6 +1278,79 @@ def test_real_titanic_survival_gap_localizes_to_sex_not_class():
     assert body["gates"]["pclass"]["verdict"] == "ABSTAIN"     # the popular guess doesn't hold up
     assert body["confidence"] < 0.3                            # real data: honestly uncertain
     assert body["action"]["kind"] == "RECOMMEND"               # too low-confidence to auto-execute
+
+
+def test_real_college_majors_stem_gap_localizes_to_gender_majority():
+    """fivethirtyeight/college-majors' recent-grads.csv: 173 real US majors,
+    each with real (not invented) total/employed counts. Splitting on the
+    dataset's own STEM classification (Engineering, Computers & Mathematics,
+    Biology & Life Science, Physical Sciences, Agriculture & Natural
+    Resources vs. everything else — a standard categorization, not one we
+    picked to force a result) drops the employment rate 81.0% -> 75.0%. That
+    move is NOT uniform: splitting further by the majority gender of each
+    major (also a real, pre-existing field: ShareWomen) shows the drop
+    concentrating in majority-women majors (81.5% -> 68.8%) far more than
+    majority-men ones (79.9% -> 79.2%) — a real, un-planted finding, with
+    genuinely low confidence to show for it, same as the Titanic case above."""
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent / "examples"
+    r = client.post("/investigate/upload", files={
+        "baseline": ("nonstem.csv",
+                    (root / "real_majors_nonstem.csv").read_bytes(), "text/csv"),
+        "current": ("stem.csv",
+                   (root / "real_majors_stem.csv").read_bytes(), "text/csv"),
+    })
+    body = r.json()
+    assert body["verdict"] == "ASSERT"
+    assert body["root_cause"] == {"dimension": "gender_majority", "segment": "majority_women"}
+    assert body["confidence"] < 0.1                              # real data: honestly uncertain
+    assert body["action"]["kind"] == "RECOMMEND"                 # too low-confidence to auto-execute
+
+
+def test_real_college_majors_raw_columns_need_qwens_schema_mapping(monkeypatch):
+    """Same real dataset, but with its columns left as a plausible raw export
+    would actually look (Field/Group/Total/Employed) instead of hand-renamed
+    to metric/dim/n/c. `template_map_schema()` (the deterministic mock/
+    fallback heuristic) genuinely cannot solve this: 'Employed' isn't in its
+    keyword list (success/conversion/converted/purchase/click), so the
+    mapping comes back incomplete and /sources/.../observe correctly 400s
+    rather than guessing. This is the honest gap the README points at —
+    "a real source with truly unusual column names" — not a synthetic one
+    engineered to already contain a matching keyword. Once given the mapping
+    a competent read of the columns/sample-rows would produce (which is
+    exactly what map_schema()'s real-mode Qwen call, prompted the same way,
+    is asked to return), the downstream math recovers the identical verdict
+    proven above with the pre-renamed CSVs — the ONLY thing standing between
+    'unreadable' and 'correct' here is that one mapping decision."""
+    import prove_or_abstain.llm as llm
+    from pathlib import Path
+    from prove_or_abstain import memory
+    root = Path(__file__).resolve().parent.parent / "examples"
+    raw_nonstem = (root / "real_majors_nonstem_raw.csv").read_bytes()
+    raw_stem = (root / "real_majors_stem_raw.csv").read_bytes()
+
+    mapping = llm.template_map_schema(
+        ["Field", "Group", "Total", "Employed"],
+        [{"Field": "Employment", "Group": "majority_men", "Total": 1660894, "Employed": 1327119}])
+    assert mapping["metric_column"] is None and mapping["c_column"] is None   # genuinely stuck
+
+    memory.reset()
+    r = client.post("/sources/majors_raw_mock/observe",
+                    files={"panel": ("nonstem.csv", raw_nonstem, "text/csv")})
+    assert r.status_code == 400                              # honest failure, not a guess
+
+    correct_mapping = {"dim_columns": ["Group"], "metric_column": "Field",
+                       "n_column": "Total", "c_column": "Employed",
+                       "self_verified": True, "reason": "test: the mapping a correct read produces"}
+    memory.reset()
+    monkeypatch.setattr(llm.QwenClient, "map_schema", lambda self, columns, sample_rows: correct_mapping)
+    client.post("/sources/majors_raw_mapped/observe",
+                files={"panel": ("nonstem.csv", raw_nonstem, "text/csv")})
+    r = client.post("/sources/majors_raw_mapped/observe",
+                    files={"panel": ("stem.csv", raw_stem, "text/csv")})
+    body = r.json()
+    assert body["verdict"] == "ASSERT"
+    assert body["root_cause"] == {"dimension": "Group", "segment": "majority_women"}
 
 
 # --------------------------------------------------- SSE streaming + fallback
@@ -1171,6 +1473,30 @@ def test_audit_replay_detects_tampering():
                                final["agent_trace"], final["llm"]["model"], "agent")
     trail["confidence"] = 0.123                            # tamper
     assert verify_replay(trail, investigate_agentic(dict(st))) is False
+
+
+def test_audit_trail_significant_flag_correct_for_sum_metrics():
+    """A "sum" metric's significance gate is a sample-floor check
+    (gates.py:evaluate_gates), not a z-test, so leading_p stays NaN even
+    when the gate genuinely passed. The audit trail must reflect the real
+    gate outcome (GateReport.significant), not silently report False for
+    every sum-kind ASSERT just because leading_p is unusable here."""
+    from prove_or_abstain.agent_loop import investigate_agentic
+    from prove_or_abstain.audit import create_audit_trail
+    from prove_or_abstain.benchmark import _revenue_panel
+    base, curr = _revenue_panel("paid")
+    st = {"baseline": base, "current": curr, "metrics": ["revenue"],
+          "metric_kinds": {"revenue": "sum"}, "dims": ["segment", "device"],
+          "autopilot_enabled": False, "trace": []}
+    final = investigate_agentic(dict(st))
+    assert final["verdict"] == "ASSERT"                    # sanity: the scenario asserts
+    win = final["winning_report"]
+    assert math.isnan(win.leading_p)                       # no z-test ran for "sum"
+    assert win.significant is True                         # but the real gate passed
+
+    trail = create_audit_trail(final, final["reports_by_dim"],
+                               final["agent_trace"], final["llm"]["model"], "agent")
+    assert trail["gates"]["significant"] is True            # must match, not silently False
 
 
 # ------------------------------------------------ robust JSON parsing (llm)
