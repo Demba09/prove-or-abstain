@@ -6,7 +6,7 @@
 # prove-or-abstain
 
 [![CI](https://github.com/Demba09/prove-or-abstain/actions/workflows/ci.yml/badge.svg)](https://github.com/Demba09/prove-or-abstain/actions)
-[![benchmark](https://img.shields.io/badge/benchmark-100%25%20(30%2F30)-brightgreen.svg)](#benchmark)
+[![benchmark](https://img.shields.io/badge/benchmark-100%25%20(33%2F33)-brightgreen.svg)](#benchmark)
 [![false-ASSERT](https://img.shields.io/badge/false--ASSERT-0%25-brightgreen.svg)](#benchmark)
 [![calibration](https://img.shields.io/badge/ECE-0.19-blue.svg)](#calibration)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -48,7 +48,7 @@ the agent will always fabricate a plausible-sounding diagnosis — right or wron
 | **Invoke external tools** | SQL connector, Google Sheets connector, CSV upload, time series, continuous source ingestion |
 | **Continuous autonomy** | `monitor.py` watches sources, investigates on movement, persists a durable baseline, alerts |
 | **Human-in-the-loop checkpoints** | ABSTAIN always escalates; autopilot requires confidence ≥ 0.70 to execute; alerts resolvable |
-| **Provable, not just a demo** | 30-scenario benchmark (100%, 0% false-ASSERT) plus 3 real external datasets, ECE calibration, reproducible audit trails, per-request cost |
+| **Provable, not just a demo** | 33-scenario benchmark (100%, 0% false-ASSERT) — 30 synthetic + 3 real-world datasets, ECE calibration, reproducible audit trails, per-request cost |
 | **Production-ready** | Docker, CI, 105 tests, SQLite persistence, SSE streaming, API docs at `/docs` (ReDoc) |
 
 Qwen (via DashScope) orders dimensions, phrases reports, routes questions, and — the one
@@ -244,7 +244,7 @@ python -m prove_or_abstain.benchmark
 | noisy (borderline confidence) | 3 | ASSERT | 3/3 ✅ |
 
 ```
-accuracy = 100% (30/30)   false-ASSERT = 0%   false-ABSTAIN = 0%
+accuracy = 100% (33/33)   false-ASSERT = 0%   false-ABSTAIN = 0%
 ```
 
 The result is **identical in `graph` and `agent` mode** — the math decides, so
@@ -453,7 +453,7 @@ python scripts/simulate.py          # full flow without LangGraph, mock-forced
 python scripts/run_phase1.py        # the 2 headline scenarios through the real graph
 python scripts/check_qwen.py        # is my DashScope key/endpoint alive?
 
-python -m prove_or_abstain.benchmark   # 30 ground-truth scenarios -> accuracy
+python -m prove_or_abstain.benchmark   # 33 ground-truth scenarios -> accuracy
 python -m prove_or_abstain.calibrate   # confidence calibration + ECE
 python -m prove_or_abstain.monitor     # one autonomous surveillance cycle
 python -m prove_or_abstain.audit       # audit trail + reproducibility check

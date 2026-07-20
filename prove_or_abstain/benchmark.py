@@ -178,6 +178,24 @@ def build_scenarios() -> list[Scenario]:
     add("noisy_2", "noisy", _noisy_seg_drop("paid", 0.048, 7), "ASSERT", "segment=paid")
     add("noisy_3", "noisy", _noisy_seg_drop("organic", 0.033, 13), "ASSERT", "segment=organic")
 
+    # 3 real-world datasets — ground truth from known facts, not planted
+    _ex = Path(__file__).resolve().parent.parent / "examples"
+    _tb = pd.read_csv(_ex / "real_titanic_southampton.csv")
+    _tc = pd.read_csv(_ex / "real_titanic_cherbourg.csv")
+    add("real_titanic", "real_data", _tc, "ASSERT", "sex=female",
+        baseline=_tb, dims=("sex",), metrics=("survived",))
+
+    _mb = pd.read_csv(_ex / "real_majors_nonstem.csv")
+    _mc = pd.read_csv(_ex / "real_majors_stem.csv")
+    add("real_majors", "real_data", _mc, "ASSERT", "gender_majority=majority_women",
+        baseline=_mb, dims=("gender_majority",), metrics=("employed",))
+
+    _fl = pd.read_csv(_ex / "real_flights_series.csv")
+    _fb, _fc = P.split_series(_fl, window=1)
+    add("real_flights", "real_data", _fc, "ABSTAIN", None,
+        baseline=_fb, dims=("month",), metrics=("passengers",),
+        kinds={"passengers": "sum"})
+
     return sc
 
 
