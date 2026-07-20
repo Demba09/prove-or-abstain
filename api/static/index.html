@@ -294,11 +294,6 @@ footer a { color: var(--accent-strong); }
         <span class="track"></span>
         autopilot (execute at confidence &ge; 0.70)
       </label>
-      <span class="mode-select" role="group" aria-label="Orchestration mode">
-        <span class="mode-label">orchestration</span>
-        <button type="button" class="mode-btn" id="mode-graph" data-mode="graph" aria-pressed="true">graph</button>
-        <button type="button" class="mode-btn" id="mode-agent" data-mode="agent" aria-pressed="false">agent (Qwen drives)</button>
-      </span>
     </div>
 
     <div class="divider"></div>
@@ -339,8 +334,15 @@ footer a { color: var(--accent-strong); }
     <div class="divider"></div>
 
     <details class="advanced" id="advancedToggle">
-      <summary>Advanced — upload two CSVs to compare directly</summary>
+      <summary>Advanced — upload two CSVs to compare directly, or switch orchestration mode</summary>
       <div class="advanced-body">
+        <div class="row" style="margin:8px 0;">
+          <span class="mode-select" role="group" aria-label="Orchestration mode">
+            <span class="mode-label">mode</span>
+            <button type="button" class="mode-btn" id="mode-agent-adv" data-mode="agent" aria-pressed="true">agent</button>
+            <button type="button" class="mode-btn" id="mode-graph-adv" data-mode="graph" aria-pressed="false">graph</button>
+          </span>
+        </div>
         <p class="field-label" style="margin:8px 0;">A one-off comparison with no persisted history — for that,
           use "Watch a source" above. Also reachable via SQL or Google Sheets; see <a href="/docs">API docs</a>.</p>
         <div class="upload-row">
@@ -423,12 +425,11 @@ footer a { color: var(--accent-strong); }
 const $ = id => document.getElementById(id);
 let activePanel = null;
 let activeContext = null;   // {type:'panel', panel} | {type:'source', source_id} — what "ask" targets
-let orchestrationMode = 'graph';   // 'graph' (fixed pipeline) | 'agent' (Qwen drives via tool calls)
+let orchestrationMode = 'agent';   // 'agent' (Qwen drives via tool calls) or 'graph' (fixed pipeline)
 
 function setMode(mode) {
   orchestrationMode = mode;
-  $('mode-graph').setAttribute('aria-pressed', String(mode === 'graph'));
-  $('mode-agent').setAttribute('aria-pressed', String(mode === 'agent'));
+  document.querySelectorAll('.mode-btn').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === mode)));
 }
 
 function updateQueryLabel() {
@@ -753,8 +754,7 @@ async function showDataset(body) {
 }
 
 document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => runPanel(t.dataset.panel)));
-$('mode-graph').addEventListener('click', () => setMode('graph'));
-$('mode-agent').addEventListener('click', () => setMode('agent'));
+document.querySelectorAll('.mode-btn').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
 $('askBtn').addEventListener('click', runQuery);
 $('query').addEventListener('keydown', e => { if (e.key === 'Enter') runQuery(); });
 $('uploadBtn').addEventListener('click', runUpload);
