@@ -8,7 +8,7 @@
 [![CI](https://github.com/Demba09/prove-or-abstain/actions/workflows/ci.yml/badge.svg)](https://github.com/Demba09/prove-or-abstain/actions)
 [![benchmark](https://img.shields.io/badge/benchmark-100%25%20(20%2F20)-brightgreen.svg)](#benchmark)
 [![false-ASSERT](https://img.shields.io/badge/false--ASSERT-0%25-brightgreen.svg)](#benchmark)
-[![calibration](https://img.shields.io/badge/ECE-0.19-blue.svg)](#calibration)
+[![calibration](https://img.shields.io/badge/ECE-0.41-blue.svg)](#calibration)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/)
 
@@ -422,13 +422,16 @@ python -m prove_or_abstain.benchmark
 ```
 
 ```
-ECE = 0.19   (n = 18 ASSERT predictions)
+ECE = 0.41   (n = 9 ASSERT predictions)
 ```
 
 Every asserted cause in the benchmark is correct — even at 0.41 confidence — so
 the score is **conservative**: it under-states reliability rather than
-over-stating it. For an agent that can *act* on its verdict, erring toward
-under-confidence is the safe direction.
+over-stating it. In every confidence bucket, accuracy (100%) is at or above
+average confidence — never the other way round. For an agent that can *act*
+on its verdict, erring toward under-confidence is the safe direction; the
+high ECE here is a small-sample artifact (9 ASSERT scenarios) of that same
+one-sided gap, not miscalibration in the risky direction.
 
 ## Cost
 
@@ -474,6 +477,7 @@ prove_or_abstain/   core package — the deterministic pipeline
   investigate.py      shared state-building/graph-invocation tail (api/app.py + ingest.py)
   webhook.py          outbound notifications on EXECUTE
   cost_tracker.py     token counting + cost estimation
+  ratelimit.py        per-IP request rate limiting (single-instance, in-memory)
   benchmark.py        20 ground-truth scenarios (10 synthetic + 10 real) + cross-model eval + ECE calibration
   audit.py            reproducible, verifiable audit trails
   evidence.py         synthetic operational-event lookup, grounds ASSERT speculation
@@ -482,7 +486,9 @@ api/                deployment entry point — FastAPI app + static demo page (S
 mcp_server.py       MCP entry point for Qwen Cloud agents
 scripts/            validation & demo tooling (see below)
 tests/              pytest suite (112 tests, runs offline with QWEN_MOCK=1)
-examples/           sample CSVs — synthetic (planted ground truth) + 4 real public datasets
+examples/           sample CSVs — synthetic (planted ground truth) + real public datasets
+                    (10 scored in the benchmark: seaborn/vega/UCI/fivethirtyeight; taxis
+                    demoed standalone, not yet scored)
 docs/               architecture diagram, demo script, devpost, UI audit, blog
 ```
 
@@ -511,6 +517,8 @@ Copy `.env.example` to `.env` (never committed, excluded from the Docker image):
 | `QWEN_MOCK=1` | force mock mode even with a key set |
 | `WEBHOOK_URL` | where EXECUTE notifications are POSTed — payload auto-formats for Slack, Discord or Teams from the hostname, generic JSON otherwise. Absent → stdout |
 | `PROBATIO_DB` | SQLite path for investigation history + alerts (`memory.py`). Default `:memory:` — set a file path to persist across restarts |
+| `RATE_LIMIT_PER_MINUTE` | requests/minute per client IP on every route except `/health` (`ratelimit.py`). Default 60 |
+| `LOG_LEVEL` | Python logging level for the app's own log output. Default `INFO` |
 
 ### Validate the pipeline yourself
 
@@ -538,7 +546,7 @@ POST /investigate/query    natural language: { "query": "why did conversion drop
                            or, about a watched source instead: { "query": "...", "source_id": "my-dashboard-metric" }
 POST /investigate/suggest  setup helper: upload a sample CSV, get back sum-vs-rate metric classification
 POST /investigate/upload   CSV upload (multipart: baseline + current)
-POST /investigate/example  one-click real-world proof: { "name": "titanic" | "taxis" } — same pipeline, a real (not planted) dataset
+POST /investigate/example  one-click real-world proof (multipart form: name=titanic|taxis) — same pipeline, a real (not planted) dataset
 POST /investigate/sql      live database: { "dsn": "...", "baseline_query": "...", "current_query": "..." }
 POST /investigate/sheets   live Google Sheets: { "baseline_url": "...", "current_url": "..." }
 POST /investigate/series   time series (multipart: series.csv + window)
