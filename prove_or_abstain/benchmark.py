@@ -432,3 +432,10 @@ if __name__ == "__main__":
               "compare_llm_raw + cross_model_eval)")
     out_path = _write_results_json(graph_m, agent_m, live_evals)
     print(f"\nWrote {out_path} — commit it if this run should stand as recorded evidence.")
+
+    # CI guarantee: exit code 1 if accuracy drops below 100% on either mode.
+    # The 30 scenarios are designed to be trivially correct for a pipeline
+    # that implements the gates correctly — any regression here is real.
+    if graph_m["accuracy"] < 1.0 or agent_m["accuracy"] < 1.0:
+        import sys
+        sys.exit(1)

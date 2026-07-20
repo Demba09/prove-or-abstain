@@ -49,7 +49,7 @@ the agent will always fabricate a plausible-sounding diagnosis — right or wron
 | **Continuous autonomy** | `monitor.py` watches sources, investigates on movement, persists a durable baseline, alerts |
 | **Human-in-the-loop checkpoints** | ABSTAIN always escalates; autopilot requires confidence ≥ 0.70 to execute; alerts resolvable |
 | **Provable, not just a demo** | 30-scenario benchmark (100%, 0% false-ASSERT) plus 3 real external datasets, ECE calibration, reproducible audit trails, per-request cost |
-| **Production-ready** | Docker, CI, 95 tests, SQLite persistence, SSE streaming, API docs at `/docs` (ReDoc) |
+| **Production-ready** | Docker, CI, 105 tests, SQLite persistence, SSE streaming, API docs at `/docs` (ReDoc) |
 
 Qwen (via DashScope) orders dimensions, phrases reports, routes questions, and — the one
 deliberate exception — maps an unfamiliar source's columns. Everywhere else the math decides,
@@ -410,7 +410,7 @@ prove_or_abstain/   core package — the deterministic pipeline
 api/                deployment entry point — FastAPI app + static demo page (SSE stream)
 mcp_server.py       MCP entry point for Qwen Cloud agents
 scripts/            validation & demo tooling (see below)
-tests/              pytest suite (95 tests, runs offline with QWEN_MOCK=1)
+tests/              pytest suite (105 tests, runs offline with QWEN_MOCK=1)
 examples/           sample CSVs — synthetic (planted ground truth) + 3 real public datasets
 docs/               architecture diagram, demo script, devpost text
 ```
