@@ -31,12 +31,16 @@ decides no verdict. It does exactly four things:
     the ones supplied.
   - map_schema()      : MAP an unfamiliar RAW source's columns onto the
     long-panel contract [metric, dims..., n, c] — dimensions, metric name,
-    n/c counts. The ONE exception to "the verdict never depends on Qwen":
-    interpreting ambiguous column names has no single deducible answer, so
-    mock and real mode can genuinely disagree here. The only place with a
-    2nd, self-verification pass in real mode (Qwen re-checks its own first
+    n/c counts, OR (when no n/c pair exists as columns at all — one row per
+    observation, e.g. raw weekly sales) a value column to deterministically
+    aggregate into n=count/c=sum, grouped by Qwen-selected dim_columns. The
+    ONE exception to "the verdict never depends on Qwen": interpreting
+    ambiguous column names has no single deducible answer, so mock and real
+    mode can genuinely disagree here. The only place with a 2nd,
+    self-verification pass in real mode (Qwen re-checks its own first
     answer before it's acted on) — see its docstring for why. Never invents
-    a column name outside the ones supplied, at either pass.
+    a column name outside the ones supplied, at either pass — and the
+    aggregation arithmetic itself is plain pandas, not Qwen.
 
 Mock mode: if DASHSCOPE_API_KEY is absent or QWEN_MOCK=1, no network call is
 made and deterministic outputs are returned — the pipeline runs offline.
@@ -409,10 +413,29 @@ class QwenClient:
     def map_schema(self, columns: list[str], sample_rows: list[dict]) -> dict:
         """Returns {"dim_columns": [...], "metric_column": <name or None>,
         "n_column": <name or None>, "c_column": <name or None>,
-        "self_verified": bool, "reason": <text>}. In mock mode, a single
-        deterministic pass (self_verified=True — the template has no doubt
-        to re-examine). In real mode, a proposal pass followed by a
-        self-verification pass that may correct it."""
+        "value_column": <name or None>, "self_verified": bool,
+        "reason": <text>}.
+
+        Two mappings a caller can get back:
+        - n_column/c_column set: the raw file already has a genuine
+          population/success count PAIR as two of its columns — the
+          existing rename-only path (n0 -> n, c0 -> c).
+        - value_column set instead: the file has no such pair — one row
+          per observation, one numeric column to total (sales, revenue,
+          amount...). Nothing here computes anything: the caller
+          deterministically aggregates n=count(rows), c=sum(value_column)
+          grouped by dim_columns (api/app.py:_apply_schema_mapping) — same
+          discipline as everywhere else in this codebase, Qwen SELECTS
+          which column plays which role, the arithmetic is plain pandas.
+          dim_columns here is a POSITIVE selection (which columns are
+          meaningful breakdowns), not "everything left over" — a raw
+          per-row file usually also has covariates (weather, price index,
+          a date) that would fragment the aggregation into meaningless
+          near-singleton groups if swept in by default.
+
+        In mock mode, a single deterministic pass (self_verified=True — the
+        template has no doubt to re-examine). In real mode, a proposal pass
+        followed by a self-verification pass that may correct it."""
         if self.mock:
             self.last_mode, self.last_error = "mock", None
             return template_map_schema(columns, sample_rows)
@@ -420,16 +443,28 @@ class QwenClient:
         propose_system = (
             "You are given the column names and a few sample rows of a raw "
             "dataset that must be reshaped into a long panel "
-            "[metric, dimensions..., n, c]. Identify: the ONE column holding "
-            "the metric name (categorical, e.g. 'conversion'/'revenue'), the "
-            "ONE column that is the population/denominator count (n), the "
-            "ONE column that is the success/numerator or total count (c), "
-            "and which of the REMAINING columns are dimensions (categorical "
-            "breakdown columns, e.g. platform/category/country). Return ONLY "
-            "a JSON object: {\"dim_columns\": [...], \"metric_column\": "
-            "<name or null>, \"n_column\": <name or null>, \"c_column\": "
-            "<name or null>, \"reason\": <one short sentence>}. Do not "
-            "invent a column name outside the supplied list."
+            "[metric, dimensions..., n, c]. First check: does this data "
+            "already have a genuine population/denominator count column "
+            "(n) AND a separate success/numerator-or-total count column "
+            "(c)? If yes, identify those two, plus the ONE column holding "
+            "the metric name (categorical, e.g. 'conversion'/'revenue'), "
+            "and set value_column to null. If NOT — e.g. one row per "
+            "observation with a single numeric quantity to total, like "
+            "sales or revenue, and no separate count columns — instead "
+            "identify value_column: the ONE column holding that numeric "
+            "quantity to sum (never an id, a date, or an unrelated "
+            "covariate), and leave n_column/c_column null; the caller "
+            "will deterministically compute n=count of rows and c=sum of "
+            "value_column per group. Either way, identify dim_columns: "
+            "ONLY the columns that are meaningful categorical breakdowns "
+            "to compare across (e.g. store/platform/country) — exclude "
+            "dates, ids, and unrelated covariates even if no other role "
+            "was assigned to them. Return ONLY a JSON object: "
+            "{\"dim_columns\": [...], \"metric_column\": <name or null>, "
+            "\"n_column\": <name or null>, \"c_column\": <name or null>, "
+            "\"value_column\": <name or null>, \"reason\": <one short "
+            "sentence>}. Do not invent a column name outside the supplied "
+            "list."
         )
         user = json.dumps({"columns": columns, "sample_rows": sample_rows[:5]},
                           ensure_ascii=False)
@@ -443,16 +478,20 @@ class QwenClient:
             verify_system = (
                 "You just proposed this column mapping for a raw dataset. "
                 "Re-examine it against the sample rows: does each column "
-                "really hold what you assigned it (metric name / population "
-                "count n / success-or-total count c / dimension)? If "
-                "something looks wrong, correct it. Return ONLY a JSON "
+                "really hold what you assigned it (metric name / "
+                "population count n / success-or-total count c / a value "
+                "to sum / dimension)? If a value_column was proposed, "
+                "double check it isn't an id, a date, or a covariate "
+                "unrelated to the metric, and that dim_columns doesn't "
+                "sweep in dates/ids/covariates as if they were breakdowns. "
+                "If something looks wrong, correct it. Return ONLY a JSON "
                 "object with the FINAL mapping (corrected or unchanged): "
                 "{\"dim_columns\": [...], \"metric_column\": <name or null>, "
                 "\"n_column\": <name or null>, \"c_column\": <name or null>, "
-                "\"self_verified\": <true if you kept your first answer, "
-                "false if you corrected it>, \"reason\": <one short "
-                "sentence>}. Do not invent a column name outside the "
-                "supplied list."
+                "\"value_column\": <name or null>, \"self_verified\": <true "
+                "if you kept your first answer, false if you corrected "
+                "it>, \"reason\": <one short sentence>}. Do not invent a "
+                "column name outside the supplied list."
             )
             verify_user = json.dumps({"columns": columns, "sample_rows": sample_rows[:5],
                                       "proposed_mapping": proposed}, ensure_ascii=False)
@@ -472,20 +511,24 @@ class QwenClient:
     def _guarded_schema_mapping(raw: dict, columns: list[str]) -> dict:
         """Anti-invention guard shared by both map_schema() passes: every
         returned column name must be one actually supplied, else dropped —
-        same discipline as _guard_filter()/suggest_setup()."""
+        same discipline as _guard_filter()/suggest_setup(). Also guards
+        value_column (the aggregate-instead-of-rename path, see
+        map_schema()'s docstring) the same way."""
         if not isinstance(raw, dict):
             raise ValueError("map_schema did not return an object")
         cols = set(columns)
         metric_col = raw.get("metric_column")
         n_col = raw.get("n_column")
         c_col = raw.get("c_column")
+        value_col = raw.get("value_column")
         metric_col = metric_col if metric_col in cols else None
         n_col = n_col if n_col in cols else None
         c_col = c_col if c_col in cols else None
+        value_col = value_col if value_col in cols else None
         dim_cols = [c for c in raw.get("dim_columns", [])
-                   if c in cols and c not in (metric_col, n_col, c_col)]
+                   if c in cols and c not in (metric_col, n_col, c_col, value_col)]
         out = {"dim_columns": dim_cols, "metric_column": metric_col,
-              "n_column": n_col, "c_column": c_col,
+              "n_column": n_col, "c_column": c_col, "value_column": value_col,
               "reason": raw.get("reason", "")}
         if "self_verified" in raw:
             out["self_verified"] = raw["self_verified"]
@@ -609,9 +652,58 @@ def template_map_schema(columns: list[str], sample_rows: list[dict]) -> dict:
             or _first_match(_N_HINTS, {metric_col}))
     c_col = (_first_exact("c", {metric_col, n_col})
             or _first_match(_C_HINTS, {metric_col, n_col}))
+
+    if n_col and c_col:
+        dim_cols = [c for c in columns if c not in (metric_col, n_col, c_col)]
+        return {"dim_columns": dim_cols, "metric_column": metric_col,
+               "n_column": n_col, "c_column": c_col, "value_column": None,
+               "self_verified": True,
+               "reason": "keyword heuristic (mock/fallback, no LLM call)"}
+
+    # No n/c pair found by keyword — try the aggregate-instead path (see
+    # map_schema()'s docstring). Only commits to a value_column when exactly
+    # ONE candidate remains: a column that isn't an id/date/flag/code by
+    # name and whose sample values are all numeric. More than one candidate
+    # (e.g. a metric column sitting alongside several numeric covariates)
+    # is a real judgment call a keyword scan can't make — this deliberately
+    # returns None rather than guess, same as it does for n/c.
+    #
+    # Two DIFFERENT exclusion lists on purpose: "store_id"/"product_id" are
+    # everyday, perfectly good DIMENSION names (an id column is usually the
+    # meaningful category to group by) — they're only wrong as a VALUE to
+    # sum. Only a raw date is wrong on both counts (a time axis, not a
+    # thing to total or a breakdown to compare — "Watch a source" already
+    # handles the time dimension via its own persisted history).
+    _NON_VALUE_NAME_HINTS = ("id", "date", "flag", "code")
+    _NON_DIM_NAME_HINTS = ("date",)
+
+    def _is_numeric_column(col):
+        values = [row[col] for row in sample_rows if col in row]
+        return bool(values) and all(
+            isinstance(v, (int, float)) and not isinstance(v, bool) for v in values)
+
+    numeric_candidates = [
+        c for c in columns
+        if c != metric_col
+        and not any(h in c.lower() for h in _NON_VALUE_NAME_HINTS)
+        and _is_numeric_column(c)
+    ]
+    value_col = numeric_candidates[0] if len(numeric_candidates) == 1 else None
+
+    if value_col:
+        dim_cols = [c for c in columns
+                   if c not in (metric_col, value_col)
+                   and not any(h in c.lower() for h in _NON_DIM_NAME_HINTS)
+                   and not _is_numeric_column(c)]
+        return {"dim_columns": dim_cols, "metric_column": metric_col,
+               "n_column": None, "c_column": None, "value_column": value_col,
+               "self_verified": True,
+               "reason": "keyword heuristic (mock/fallback, no LLM call)"}
+
     dim_cols = [c for c in columns if c not in (metric_col, n_col, c_col)]
     return {"dim_columns": dim_cols, "metric_column": metric_col,
-           "n_column": n_col, "c_column": c_col, "self_verified": True,
+           "n_column": n_col, "c_column": c_col, "value_column": None,
+           "self_verified": True,
            "reason": "keyword heuristic (mock/fallback, no LLM call)"}
 
 
