@@ -285,8 +285,21 @@ footer a { color: var(--accent-strong); }
 .dash-alert .info .meta { font-size: 12.5px; color: var(--muted); }
 .dash-alert .resolve-btn { font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 6px; cursor: pointer; border: 1px solid var(--accent); background: var(--card); color: var(--accent); }
 .dash-alert .resolve-btn:hover { background: var(--accent); color: #fff; }
+.dash-alert .resolve-btn.confirming { border-color: var(--abstain); background: var(--abstain); color: #fff; }
 .dash-alert .resolved-tag { font-size: 12px; color: var(--assert); font-weight: 600; }
 .dash-empty { color: var(--muted); font-size: 13.5px; padding: 8px 0; }
+.dash-check-result { font-size: 13px; margin-top: 14px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 13px; background: var(--panel-alt); display: none; }
+.dash-check-result .title { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.dash-check-result ul { margin: 0; padding-left: 16px; font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; line-height: 1.7; }
+
+/* Cold-start (a source's first observation) is not a verdict — an ASSERT/
+   ABSTAIN stamp there would read as a fake result — so it gets a small
+   neutral confirmation pill instead. */
+.stamp.seeded {
+  font-size: 13px; font-weight: 700; letter-spacing: .05em; padding: 5px 13px;
+  border-radius: 999px; transform: none; border: 1px solid var(--assert);
+  color: var(--assert); background: var(--assert-bg);
+}
 </style>
 </head>
 <body>
@@ -428,21 +441,24 @@ footer a { color: var(--accent-strong); }
     </details>
   </div>
 
-  <div class="panel" id="dashPanel">
-    <div class="dash-header">
-      <h2>Autopilot dashboard — autonomous monitoring</h2>
-      <button class="secondary" type="button" id="dash-check-btn" onclick="runAutonomousCheck()">run autonomous check</button>
+  <details class="panel advanced" id="dashToggle">
+    <summary>Autopilot dashboard — autonomous monitoring</summary>
+    <div class="advanced-body" id="dashPanel">
+      <div class="dash-header">
+        <button class="secondary" type="button" id="dash-check-btn" onclick="runAutonomousCheck()">run autonomous check</button>
+      </div>
+      <p class="field-label" style="margin:-4px 0 12px;">"Autonomous checks" and "last check" only count runs of the
+        button above (or a scheduler hitting <code>/investigate/check</code>) — not the scenarios above, which only
+        show up here under "total executions" if autopilot was ON and confidence cleared 0.70.</p>
+      <div class="dash-stats" id="dash-stats"></div>
+      <div id="dash-alerts"></div>
+      <div class="dash-empty" id="dash-empty">Loading&hellip;</div>
+      <div class="dash-check-result" id="dash-check-result" style="display:none;"></div>
+      <div id="dash-webhook" style="display:none; margin-top:14px; font-size:12.5px; color:var(--muted);">
+        <span style="font-weight:600; color:var(--accent-strong);">🔔</span> <span id="dash-webhook-text"></span>
+      </div>
     </div>
-    <p class="field-label" style="margin:-8px 0 12px;">"Autonomous checks" and "last check" only count runs of the
-      button above (or a scheduler hitting <code>/investigate/check</code>) — not the scenarios above, which only
-      show up here under "total executions" if autopilot was ON and confidence cleared 0.70.</p>
-    <div class="dash-stats" id="dash-stats"></div>
-    <div id="dash-alerts"></div>
-    <div class="dash-empty" id="dash-empty">Loading&hellip;</div>
-    <div id="dash-webhook" style="display:none; margin-top:14px; font-size:12.5px; color:var(--muted);">
-      <span style="font-weight:600; color:var(--accent-strong);">🔔</span> <span id="dash-webhook-text"></span>
-    </div>
-  </div>
+  </details>
 
   <footer>
     <a href="/docs">API docs</a> · <a href="https://github.com/Demba09/prove-or-abstain">GitHub</a>
@@ -499,7 +515,7 @@ async function call(url, opts) {
         'Autopilot sent notification: ' + body.action.detail +
         (body.root_cause ? ' (' + body.root_cause.dimension + '=' + body.root_cause.segment + ')' : '');
     }
-    loadDashboard();   // an EXECUTE just happened, or didn't — either way, reflect it now, not in up to 30s
+    if (dashboardOpen) loadDashboard();   // an EXECUTE just happened, or didn't — either way, reflect it now, not in up to 30s
   } catch (e) {
     fail(e.message);
   } finally {
@@ -585,7 +601,9 @@ function render(b) {
   const v = b.verdict || 'NO_ANOMALY';
   const stamp = $('verdict');
   if (b.cold_start) {
-    stamp.style.display = 'none';
+    stamp.style.display = '';
+    stamp.textContent = 'SEEDED';
+    stamp.className = 'stamp seeded';
   } else {
     stamp.style.display = '';
     stamp.textContent = v;
@@ -813,6 +831,20 @@ $('uploadBtn').addEventListener('click', runUpload);
 $('observeBtn').addEventListener('click', runObserve);
 
 // ---------------------------------------------------------------- dashboard
+let dashboardOpen = false;
+let dashboardTimer = null;
+
+$('dashToggle').addEventListener('toggle', () => {
+  dashboardOpen = $('dashToggle').open;
+  if (dashboardOpen) {
+    loadDashboard();
+    if (!dashboardTimer) dashboardTimer = setInterval(loadDashboard, 30000);
+  } else if (dashboardTimer) {
+    clearInterval(dashboardTimer);
+    dashboardTimer = null;
+  }
+});
+
 async function loadDashboard() {
   try {
     const r = await fetch('/dashboard');
@@ -870,7 +902,14 @@ function renderDashboard(d) {
       const btn = document.createElement('button');
       btn.className = 'resolve-btn';
       btn.textContent = 'resolve';
-      btn.onclick = function() { resolveAlert(a.id); };
+      btn.onclick = function() {
+        if (!btn.classList.contains('confirming')) {
+          btn.classList.add('confirming');
+          btn.textContent = 'confirm?';
+          return;
+        }
+        resolveAlert(a.id);
+      };
       el.appendChild(btn);
     }
     alerts.appendChild(el);
@@ -895,6 +934,13 @@ async function runAutonomousCheck() {
     const r = await fetch('/investigate/check', {method: 'POST'});
     const body = await r.json();
     if (!r.ok) throw new Error(body.detail || r.statusText);
+
+    const resultBox = $('dash-check-result');
+    resultBox.style.display = 'block';
+    resultBox.innerHTML =
+      `<div class="title">autonomous check — ${body.panels.length} panel(s)</div>
+       <ul>${body.panels.map(p => `<li>${p.panel}: ${p.verdict}${p.action && p.action.kind === 'EXECUTE' ? ' — notified' : ''}</li>`).join('')}</ul>`;
+
     // Show webhook simulation
     const webhook = $('dash-webhook');
     const acted = body.panels.filter(p => p.action && p.action.kind === 'EXECUTE');
@@ -912,9 +958,6 @@ async function runAutonomousCheck() {
   }
 }
 
-// Load dashboard immediately and keep it fresh
-loadDashboard();
-setInterval(loadDashboard, 30000);
 </script>
 </body>
 </html>

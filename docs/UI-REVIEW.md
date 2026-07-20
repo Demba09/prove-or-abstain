@@ -11,20 +11,25 @@
 The polish findings below were all fixed, but direct feedback afterward
 ("the UI is still hard to follow, especially for a time-pressed hackathon
 judge") pointed at something this audit's per-pillar framing didn't
-capture on its own: **too many equal-weight entry points**. Before this
-pass, "Built-in scenarios", "Watch a source", "Ask in plain English" and
+capture on its own: **too many equal-weight entry points**. At the time,
+"Built-in scenarios", "Watch a source", "Ask in plain English" and
 "Advanced" all sat in the same always-open panel — four different ways to
 start, with no cue about which one to click first.
 
-Fixed by restructuring, not rewording: the scenario picker is now the
-only always-open panel ("Try it — pick a scenario", with a one-line
-ASSERT/ABSTAIN gloss right there). Watch a source, Ask, and CSV upload
-moved into a single collapsed "More" section below the result panel —
-still one click away, but no longer competing for the first click. The
-autopilot/mode toggles stay next to the scenario picker (they change what
-clicking a scenario does) but are visually de-emphasized (`opacity: .8`)
-so they read as options, not a second decision to make before the first
-one.
+Fixed by restructuring, not rewording: the "Built-in scenarios" panel
+(with the autopilot switch) is now the only always-open entry point.
+Watch a source, Ask, CSV upload, and the orchestration-mode switch moved
+into a single collapsed "More" section right below it — still one click
+away, but no longer competing for the first click. The Autopilot
+dashboard, which used to load and poll unconditionally on every page
+load, is now its own collapsed accordion too, gated so its `/dashboard`
+fetch and 30s refresh only run while it's actually open.
+
+(This structure landed independently across two separate passes — one
+that added the "More" accordion and real-dataset example scenarios, one
+that collapsed the dashboard — so the file has gone through a few rounds
+of drift and correction; this document was updated to match what's
+actually in `api/static/index.html` today, not an earlier version of it.)
 
 ---
 
@@ -215,7 +220,7 @@ When the user types in the query field, show a pre-request note: "Will route to 
 |---|---------|--------|----------|--------|--------|
 | 1 | "orchestration" label is jargon | Copywriting | Low | Rename to "investigation mode" | ✅ done |
 | 2 | Watch-a-source explanation is dense | Copywriting | Low | Move to collapsible detail | ✅ done (one-line + `how the baseline works` details) |
-| 3 | No loading spinner | Experience | Medium | Spinner on the initiating button | ✅ done (per-button, respects `prefers-reduced-motion`) |
+| 3 | No loading spinner | Experience | Medium | Spinner on the initiating button | ✅ done — global busy indicator with spinner (`#busyIndicator`), respects `prefers-reduced-motion` |
 | 4 | `alert()` for autonomous check | Experience | Medium | Replace with inline result rendering | ✅ done (renders into `#dash-check-result`) |
 | 5 | No confirmation on alert resolve | Experience | Medium | Confirmation before resolve | ✅ done — two-step inline `confirm?` (not a native `confirm()`, which would repeat the very break-of-visual-language finding #4 called out) |
 | 6 | Cold-start feedback is subtle | Experience | Low | Make cold-start state visible | ✅ done — distinct `SEEDED ✓` status pill, deliberately NOT the big verdict stamp (that earlier read as a fake ASSERT/ABSTAIN) |
