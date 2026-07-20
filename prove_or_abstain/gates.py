@@ -45,6 +45,11 @@ class GateReport:
     leading_sample_n: float
     leading_z: float              # leader's z-test statistic (NaN if not applicable)
     leading_p: float              # two-sided p-value (NaN if not applicable)
+    significant: bool             # the actual significance gate outcome — z-test
+                                   # for "rate", sample-floor fallback for "sum";
+                                   # NOT reconstructible from leading_p alone (NaN
+                                   # for "sum"), so callers needing it must read
+                                   # this field rather than recompute it
     delta_R_relative: float
     reasons: list = field(default_factory=list)    # why this verdict
     subscores: dict = field(default_factory=dict)  # confidence components
@@ -151,7 +156,7 @@ def evaluate_gates(agg: dict, out: pd.DataFrame, baseline_n: pd.Series | None = 
     return GateReport(
         verdict=verdict, confidence=confidence, leading_segment=leading,
         concentration=concentration, interaction_share=float(inter_share),
-        leading_sample_n=leading_n, leading_z=z, leading_p=p,
+        leading_sample_n=leading_n, leading_z=z, leading_p=p, significant=g_signif,
         delta_R_relative=float(delta_rel),
         reasons=reasons or ["all gates pass"],
         subscores={"f_concentration": f_conc, "f_significance": f_signif, "f_clean": f_clean},

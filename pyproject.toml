@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prove-or-abstain"
+version = "0.4.0"
+description = "An AI agent that investigates metric changes — acts when the data proves a cause, abstains otherwise."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+authors = [{ name = "Demba09" }]
+
+# requirements.txt stays the pinned, reproducible source of truth for CI and
+# the Docker build (`pip install -r requirements.txt`); this section exists
+# so the package itself is pip-installable (`pip install -e .`) without also
+# hand-maintaining a second, drifting copy of every exact pin here.
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+include = ["prove_or_abstain*", "api*"]
+
+[project.urls]
+Repository = "https://github.com/Demba09/prove-or-abstain"

@@ -426,6 +426,9 @@ QWEN_MOCK=1 pytest -q
 QWEN_MOCK=1 uvicorn api.app:app --reload
 ```
 
+The package itself is pip-installable (`pip install -e .`, via `pyproject.toml`) —
+`requirements.txt` stays the pinned source of truth CI/Docker both build from.
+
 ### Configuration
 
 Copy `.env.example` to `.env` (never committed, excluded from the Docker image):
@@ -478,6 +481,11 @@ GET  /executions           audit trail of all EXECUTE actions
 POST /executions/{id}/resolve  human resolves an active alert
 GET  /health               healthcheck
 ```
+
+Every route except `/health` is rate-limited (default 60 req/min per client
+IP, `RATE_LIMIT_PER_MINUTE` env var — see `prove_or_abstain/ratelimit.py`
+for what this is: a single-instance in-memory guard, not a distributed one).
+Over the limit returns `429`.
 
 Two distinct ways to feed it data: **compare two snapshots** yourself
 (`/investigate*` above — a one-off "last month vs this month"), or **watch a
@@ -601,6 +609,9 @@ Sum metrics (`decompose_sum`) use the same algebra with raw counts instead of sh
 docker build -t prove-or-abstain .
 docker run -p 8000:8000 -e DASHSCOPE_API_KEY=... prove-or-abstain
 ```
+
+Runs as a non-root user (`appuser`, uid 10001) — the process only serves
+HTTP on an unprivileged port and needs no elevated access.
 
 For Alibaba Cloud: push to Container Registry, run on Function Compute (port 8000).
 `/health` serves as the probe endpoint. **Honest status of this specific

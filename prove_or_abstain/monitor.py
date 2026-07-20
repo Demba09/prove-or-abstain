@@ -24,12 +24,15 @@ CLI: python -m prove_or_abstain.monitor   (one demo cycle on a built-in panel)
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 
 import pandas as pd
 
 from prove_or_abstain import ingest, memory, webhook
 from prove_or_abstain.autopilot import record_check
+
+logger = logging.getLogger(__name__)
 
 EXECUTE_CONFIDENCE = 0.70
 
@@ -119,11 +122,15 @@ class MetricMonitor:
             try:
                 await self.check_once()
             except Exception as exc:             # last-resort guard
-                print(f"[monitor] cycle error: {exc}")
+                logger.error("cycle error: %s", exc, exc_info=True)
             await asyncio.sleep(self.check_interval_s)
 
 
 if __name__ == "__main__":
+    # Standalone entry point (not via api/app.py) — configure logging here
+    # too, or run_forever()'s logger.error() calls go nowhere.
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     os.environ.setdefault("QWEN_MOCK", "1")
     os.environ.setdefault("PROBATIO_DB", ":memory:")
     from prove_or_abstain.panels import BASELINE, CLEAN

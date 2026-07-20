@@ -23,19 +23,32 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import logging
+import os
 from dataclasses import asdict
 from pathlib import Path
 from typing import Literal
 
 import pandas as pd
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 load_dotenv()
 
-from prove_or_abstain import ingest, memory, reference
+# webhook.py/monitor.py log through the standard `logging` module (not
+# print()) so output is level-filterable and can be redirected the normal
+# way — but without a handler configured, Python's root logger drops
+# anything below WARNING by default. This is the process's one entry point
+# (Dockerfile's CMD runs uvicorn against this module), so it's the right
+# place to configure it once for the whole app.
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO"),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+
+from prove_or_abstain import ingest, memory, ratelimit, reference
 from prove_or_abstain.agent_loop import investigate_agentic
 from prove_or_abstain.autopilot import get_dashboard, record_check, resolve_execution, get_executions
 from prove_or_abstain.connectors.gsheets import SheetError
@@ -49,6 +62,23 @@ from prove_or_abstain.panels import (BASELINE, CLEAN, DEEP, DIFFUSE, MIXSHIFT,
 # docs_url=None frees /docs from the built-in Swagger route so the
 # redirect below can point it at ReDoc instead.
 app = FastAPI(title="prove-or-abstain", version="0.4.0", docs_url=None)
+
+
+@app.middleware("http")
+async def _rate_limit(request: Request, call_next):
+    """Applies to every route except /health (so a container/LB health
+    probe is never the thing that trips the limit). See ratelimit.py for
+    what this is and, just as importantly, what it isn't."""
+    if request.url.path == "/health":
+        return await call_next(request)
+    fwd = request.headers.get("x-forwarded-for")
+    client_id = (fwd.split(",")[0].strip() if fwd
+                else (request.client.host if request.client else "unknown"))
+    if not ratelimit.allow(client_id):
+        return JSONResponse(
+            {"detail": f"rate limit exceeded ({ratelimit.LIMIT_PER_MINUTE}/min) — try again shortly"},
+            status_code=429)
+    return await call_next(request)
 
 # The four demo panels: CLEAN/DEEP -> ASSERT, DIFFUSE/MIXSHIFT -> ABSTAIN.
 _PANELS = {"clean": CLEAN, "diffuse": DIFFUSE, "mixshift": MIXSHIFT, "deep": DEEP}

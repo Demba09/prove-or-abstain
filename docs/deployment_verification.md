@@ -31,6 +31,11 @@ not skipped, blocked:
 1. **Building/running the actual container.** `docker build` fails in this
    sandbox: `dockerd` cannot start (`ulimit: error setting limit: Operation
    not permitted`) — the daemon itself isn't available, by sandbox design.
+   This also means the Dockerfile's non-root `USER appuser` step (added in
+   response to a code review flagging the image running as root) is
+   reviewed but not build-verified — step 1 below covers it too; watch for
+   permission errors if anything under `/app` needs to be writable beyond
+   what the `chown -R` already covers.
 2. **Pushing to Alibaba Cloud Container Registry / deploying to Function
    Compute.** No `aliyun` CLI and no Alibaba Cloud credentials exist in this
    environment. This is deliberate on my end too: actually deploying would

@@ -8,6 +8,7 @@ from an in-memory dict to SQLite.
 """
 
 from __future__ import annotations
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -43,7 +44,12 @@ class Dashboard:
 
 
 # The autonomous-check counters stay process-local (no table in the spec).
+# FastAPI runs sync endpoints in a thread pool, so /investigate/check calls
+# (record_check) can genuinely overlap — _TOTAL_CHECKS += 1 is a
+# read-modify-write, unsafe without a lock (memory.py's SQLite access uses
+# one for the same reason; these plain globals need their own).
 _START_TIME = time.time()
+_STATE_LOCK = threading.Lock()
 _LAST_CHECK: float | None = None
 _LAST_VERDICT: str | None = None
 _TOTAL_CHECKS: int = 0
@@ -106,9 +112,10 @@ def get_executions() -> dict[str, Execution]:
 
 def record_check(verdict: str | None = None) -> None:
     global _LAST_CHECK, _LAST_VERDICT, _TOTAL_CHECKS
-    _LAST_CHECK = time.time()
-    _LAST_VERDICT = verdict
-    _TOTAL_CHECKS += 1
+    with _STATE_LOCK:
+        _LAST_CHECK = time.time()
+        _LAST_VERDICT = verdict
+        _TOTAL_CHECKS += 1
 
 
 def get_dashboard() -> Dashboard:
@@ -124,11 +131,14 @@ def get_dashboard() -> Dashboard:
         "resolved": e.resolved_at is not None,
     } for e in get_executions().values()]
 
+    with _STATE_LOCK:
+        last_check, last_verdict, total_checks = _LAST_CHECK, _LAST_VERDICT, _TOTAL_CHECKS
+
     return Dashboard(
-        last_check_at=_LAST_CHECK,
-        last_check_verdict=_LAST_VERDICT,
+        last_check_at=last_check,
+        last_check_verdict=last_verdict,
         active_alerts=active,
         total_executions=len(active),
-        total_checks=_TOTAL_CHECKS,
+        total_checks=total_checks,
         uptime_seconds=time.time() - _START_TIME,
     )

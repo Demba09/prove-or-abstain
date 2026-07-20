@@ -31,14 +31,17 @@ def _input_hash(state: dict) -> str:
 
 
 def _gate_flags(rep) -> dict:
-    """Recover the four structural gate decisions from a GateReport, using the
-    same thresholds gates.py applied."""
-    import math
-    p = rep.leading_p
+    """Recover the four structural gate decisions from a GateReport. material/
+    localized/clean are simple threshold comparisons on fields the report
+    already carries, safe to recompute here. "significant" is NOT — it's a
+    z-test for "rate" metrics but a sample-floor check for "sum" metrics
+    (gates.py:evaluate_gates), and leading_p is NaN in the sum case, so
+    recomputing it from leading_p alone silently reports False even when the
+    real gate passed. Read rep.significant (the actual gate outcome) instead."""
     return {
         "material": abs(rep.delta_R_relative) >= MATERIAL_REL,
         "localized": rep.concentration >= CONCENTRATION_MIN,
-        "significant": (not math.isnan(p)) and p <= SIGNIFICANCE_ALPHA,
+        "significant": rep.significant,
         "clean": rep.interaction_share <= INTERACTION_MAX,
     }
 

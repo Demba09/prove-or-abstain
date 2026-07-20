@@ -14,6 +14,7 @@ os.environ["QWEN_MOCK"] = "1"   # before any import that instantiates the LLM cl
 os.environ.setdefault("PROBATIO_DB", ":memory:")   # never touch disk in tests
 
 import json
+import math
 
 import numpy as np
 import pandas as pd
@@ -40,6 +41,18 @@ SCENARIOS = {"CLEAN": REF_CLEAN, "DIFFUSE": REF_DIFFUSE, "MIXSHIFT": REF_MIXSHIF
 EXPECTED = {"CLEAN": "ASSERT", "DIFFUSE": "ABSTAIN", "MIXSHIFT": "ABSTAIN"}
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limit():
+    """Every test shares one TestClient/client_id, so without a reset the
+    rate-limit middleware's global counter accumulates across the whole
+    suite (100+ HTTP calls total) and starts 429ing unrelated tests partway
+    through a run. Real usage doesn't have this problem — it's an artifact
+    of one process serving the entire test suite as if it were one client."""
+    from prove_or_abstain import ratelimit
+    ratelimit.reset()
+    yield
 
 
 # -------------------------------------------------------------------- math
@@ -604,6 +617,87 @@ def test_sql_connector_rejects_stacked_statements(tmp_path):
     assert r.status_code == 400
 
 
+def test_sql_guard_allows_semicolon_inside_a_string_literal():
+    """A bare "';' in query" check would reject a single, legitimate
+    statement that happens to contain a semicolon inside a WHERE literal —
+    a false positive, not a safety win. The guard strips string literals
+    before counting ';', so this must pass."""
+    from prove_or_abstain.connectors.sql import _guard_single_select
+    _guard_single_select("SELECT metric, n, c FROM t WHERE note = 'a; b'")  # no raise
+    _guard_single_select('SELECT metric, n, c FROM t WHERE note = "a; b"')  # no raise
+    _guard_single_select("SELECT metric, n, c FROM t WHERE note = 'it''s; ok'")  # escaped quote
+
+
+def test_sql_guard_still_rejects_a_real_second_statement():
+    from prove_or_abstain.connectors.sql import SqlQueryError, _guard_single_select
+    with pytest.raises(SqlQueryError):
+        _guard_single_select("SELECT 1; DROP TABLE t")
+    with pytest.raises(SqlQueryError):
+        # a semicolon after a closed literal is a real second statement
+        _guard_single_select("SELECT * FROM t WHERE note = 'a'; DROP TABLE t")
+
+
+# --------------------------------------------------------------- rate limit
+def test_ratelimit_allows_under_limit_and_blocks_over(monkeypatch):
+    from prove_or_abstain import ratelimit
+    monkeypatch.setattr(ratelimit, "LIMIT_PER_MINUTE", 3)
+    ratelimit.reset()
+    assert ratelimit.allow("client-a") is True
+    assert ratelimit.allow("client-a") is True
+    assert ratelimit.allow("client-a") is True
+    assert ratelimit.allow("client-a") is False             # 4th within the window: blocked
+    assert ratelimit.allow("client-b") is True               # separate client, separate bucket
+
+
+def test_ratelimit_middleware_429s_and_exempts_health(monkeypatch):
+    from prove_or_abstain import ratelimit
+    monkeypatch.setattr(ratelimit, "LIMIT_PER_MINUTE", 2)
+    ratelimit.reset()
+    for _ in range(5):
+        assert client.get("/health").status_code == 200      # /health is exempt, never blocked
+
+    assert client.get("/panels/clean").status_code == 200    # 1st normal call
+    assert client.get("/panels/clean").status_code == 200    # 2nd
+    r = client.get("/panels/clean")                          # 3rd: over the limit of 2
+    assert r.status_code == 429
+    assert "rate limit" in r.json()["detail"]
+
+
+# ---------------------------------------------------------------- webhook
+def test_webhook_notify_without_url_logs_and_returns_false(monkeypatch, caplog):
+    from prove_or_abstain import webhook
+    monkeypatch.delenv("WEBHOOK_URL", raising=False)
+    with caplog.at_level("INFO", logger="prove_or_abstain.webhook"):
+        sent = webhook.notify("conversion", "ASSERT", 0.79, "segment=paid",
+                              "EXECUTE", "pause the paid campaign")
+    assert sent is False
+    assert "no WEBHOOK_URL set" in caplog.text
+    assert "segment=paid" in caplog.text          # the payload itself was logged
+
+
+def test_webhook_notify_posts_to_slack_shaped_url(monkeypatch):
+    from prove_or_abstain import webhook
+    monkeypatch.setenv("WEBHOOK_URL", "https://hooks.slack.com/services/x/y/z")
+    posted = {}
+
+    class _FakeResp:
+        status_code = 200
+
+    class _FakeRequests:
+        RequestException = Exception
+        @staticmethod
+        def post(url, json, timeout):
+            posted["url"], posted["json"] = url, json
+            return _FakeResp()
+
+    monkeypatch.setattr(webhook, "requests", _FakeRequests)
+    sent = webhook.notify("conversion", "ASSERT", 0.79, "segment=paid",
+                          "EXECUTE", "pause the paid campaign")
+    assert sent is True
+    assert posted["url"] == "https://hooks.slack.com/services/x/y/z"
+    assert "attachments" in posted["json"]          # Slack-shaped payload
+
+
 # ----------------------------------------------------------- Google Sheets
 def test_gsheets_url_normalization():
     from prove_or_abstain.connectors.gsheets import _to_csv_url
@@ -811,6 +905,33 @@ def test_autopilot_adapter_survives_on_memory():
     assert dash.active_alerts[0]["detail"] == "pause"
 
 
+def test_record_check_thread_safe_counter(monkeypatch):
+    """/investigate/check runs record_check() on a sync endpoint, so
+    concurrent calls are genuinely possible under FastAPI's thread pool.
+    _TOTAL_CHECKS += 1 is a read-modify-write; without a lock, concurrent
+    increments can race and undercount."""
+    import threading
+    from prove_or_abstain import autopilot
+    monkeypatch.setattr(autopilot, "_TOTAL_CHECKS", 0)
+    monkeypatch.setattr(autopilot, "_LAST_CHECK", None)
+    monkeypatch.setattr(autopilot, "_LAST_VERDICT", None)
+
+    n = 50
+    barrier = threading.Barrier(n)
+
+    def hit():
+        barrier.wait()
+        autopilot.record_check("ASSERT")
+
+    threads = [threading.Thread(target=hit) for _ in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert autopilot.get_dashboard().total_checks == n   # no increment lost
+
+
 # --------------------------------------------------------- benchmark harness
 
 def test_benchmark_high_accuracy_offline():
@@ -1000,6 +1121,34 @@ def test_map_schema_never_invents_a_column_name():
     assert out["c_column"] is None
     assert out["n_column"] == "total_users"
     assert set(out["dim_columns"]) == {"category"}
+
+
+def test_get_client_is_thread_safe(monkeypatch):
+    """FastAPI runs sync endpoints in a thread pool, so concurrent requests
+    can hit get_client()'s check-then-set on the very first call at once.
+    Without a lock, two threads can each see _CLIENT is None and both
+    construct a QwenClient, silently discarding one's cost tracker. A
+    Barrier maximizes the chance every thread reads _CLIENT as None at the
+    same instant, which is exactly the window the lock closes."""
+    import threading
+    from prove_or_abstain import llm
+    monkeypatch.setattr(llm, "_CLIENT", None)
+
+    n = 25
+    barrier = threading.Barrier(n)
+    results = [None] * n
+
+    def grab(i):
+        barrier.wait()
+        results[i] = llm.get_client()
+
+    threads = [threading.Thread(target=grab, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert len({id(r) for r in results}) == 1               # every thread got the SAME instance
 
 
 def test_map_schema_mock_identifies_standard_columns():
@@ -1324,6 +1473,30 @@ def test_audit_replay_detects_tampering():
                                final["agent_trace"], final["llm"]["model"], "agent")
     trail["confidence"] = 0.123                            # tamper
     assert verify_replay(trail, investigate_agentic(dict(st))) is False
+
+
+def test_audit_trail_significant_flag_correct_for_sum_metrics():
+    """A "sum" metric's significance gate is a sample-floor check
+    (gates.py:evaluate_gates), not a z-test, so leading_p stays NaN even
+    when the gate genuinely passed. The audit trail must reflect the real
+    gate outcome (GateReport.significant), not silently report False for
+    every sum-kind ASSERT just because leading_p is unusable here."""
+    from prove_or_abstain.agent_loop import investigate_agentic
+    from prove_or_abstain.audit import create_audit_trail
+    from prove_or_abstain.benchmark import _revenue_panel
+    base, curr = _revenue_panel("paid")
+    st = {"baseline": base, "current": curr, "metrics": ["revenue"],
+          "metric_kinds": {"revenue": "sum"}, "dims": ["segment", "device"],
+          "autopilot_enabled": False, "trace": []}
+    final = investigate_agentic(dict(st))
+    assert final["verdict"] == "ASSERT"                    # sanity: the scenario asserts
+    win = final["winning_report"]
+    assert math.isnan(win.leading_p)                       # no z-test ran for "sum"
+    assert win.significant is True                         # but the real gate passed
+
+    trail = create_audit_trail(final, final["reports_by_dim"],
+                               final["agent_trace"], final["llm"]["model"], "agent")
+    assert trail["gates"]["significant"] is True            # must match, not silently False
 
 
 # ------------------------------------------------ robust JSON parsing (llm)

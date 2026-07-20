@@ -58,6 +58,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 
 DEFAULT_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 DEFAULT_MODEL = "qwen-plus"
@@ -635,10 +636,17 @@ def template_speculations(p: dict) -> list[str]:
 
 # --- lazy singleton shared by the nodes ---
 _CLIENT: QwenClient | None = None
+# FastAPI runs sync `def` endpoints in a thread pool, so concurrent requests
+# can call get_client() on the very first request at once — without a lock,
+# two threads can both see _CLIENT is None and each build a QwenClient (whose
+# cost tracker starts at zero), silently orphaning one and undercounting cost.
+_CLIENT_LOCK = threading.Lock()
 
 
 def get_client() -> QwenClient:
     global _CLIENT
     if _CLIENT is None:
-        _CLIENT = QwenClient()
+        with _CLIENT_LOCK:
+            if _CLIENT is None:               # re-check: lost the race, don't rebuild
+                _CLIENT = QwenClient()
     return _CLIENT

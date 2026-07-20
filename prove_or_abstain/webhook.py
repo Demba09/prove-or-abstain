@@ -9,13 +9,15 @@ Format auto-detects common platforms from the URL hostname.
 
 from __future__ import annotations
 import json
+import logging
 import os
-import sys
 
 try:
     import requests
 except ImportError:
     requests = None
+
+logger = logging.getLogger(__name__)
 
 
 def _detect_format(url: str) -> str:
@@ -86,31 +88,31 @@ def notify(metric: str, verdict: str, confidence: float,
            cause: str | None, action: str, detail: str) -> bool:
     """Send a notification about an autopilot action.
 
-    Returns True if a webhook was sent, False if it was logged to stdout.
-    Raises only on unrecoverable errors (never on network timeout).
+    Returns True if a webhook was sent, False if it was only logged (no
+    WEBHOOK_URL, or the send failed). Raises only on unrecoverable errors
+    (never on network timeout).
     """
     url = os.environ.get("WEBHOOK_URL", "").strip()
 
     if not url:
         payload = _build_payload(metric, verdict, confidence, cause, action, detail)
-        print(json.dumps(payload, indent=2), file=sys.stderr)
+        logger.info("no WEBHOOK_URL set, logging instead:\n%s", json.dumps(payload, indent=2))
         return False
 
     fmt = _detect_format(url)
     payload = _build_payload(metric, verdict, confidence, cause, action, detail, fmt)
 
     if requests is None:
-        print(f"[webhook] requests not installed — would send to {url}", file=sys.stderr)
-        print(json.dumps(payload, indent=2), file=sys.stderr)
+        logger.warning("requests not installed — would send to %s:\n%s",
+                       url, json.dumps(payload, indent=2))
         return False
 
     try:
         resp = requests.post(url, json=payload, timeout=10)
         if resp.status_code >= 400:
-            print(f"[webhook] {url} returned {resp.status_code}: {resp.text[:200]}",
-                  file=sys.stderr)
+            logger.warning("%s returned %s: %s", url, resp.status_code, resp.text[:200])
             return False
         return True
     except requests.RequestException as exc:
-        print(f"[webhook] could not reach {url}: {exc}", file=sys.stderr)
+        logger.error("could not reach %s: %s", url, exc)
         return False

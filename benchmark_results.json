@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-20T00:28:06.593301+00:00",
+  "generated_at": "2026-07-20T00:55:25.823550+00:00",
   "generated_by": "python -m prove_or_abstain.benchmark",
   "note": "graph/agent are the 30 ground-truth scenarios (QWEN_MOCK=1 unless DASHSCOPE_API_KEY is set \u2014 reproduce with the command above). live_evals only populates with a real key.",
   "graph": {

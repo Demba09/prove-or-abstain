@@ -29,6 +29,11 @@ pydantic_core==2.46.4
 python-dateutil==2.9.0.post0
 pytest==9.1.1
 python-dotenv==1.2.2
+# psycopg2-binary bundles its own libpq — convenient (no build deps needed in
+# the slim Docker image) but upstream recommends source-built `psycopg2` for
+# production. Swapping requires adding libpq-dev/gcc to the Dockerfile's
+# build stage; left as -binary here since the SQL connector targets a
+# read-only reporting connection (connectors/sql.py), not a primary DB driver.
 psycopg2-binary==2.9.12
 PyMySQL==1.2.0
 python-multipart==0.0.32
@@ -48,4 +53,4 @@ uuid_utils==0.16.2
 websockets==15.0.1
 xxhash==3.8.0
 zstandard==0.25.0
-mcp
+mcp==1.28.1

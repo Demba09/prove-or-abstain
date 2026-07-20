@@ -14,6 +14,12 @@ COPY . .
 #   docker run -e DASHSCOPE_API_KEY=...   (or the Alibaba Cloud env panel)
 # Without a key, prove_or_abstain/llm.py falls back to mock mode: the image also runs offline.
 
+# Run as a non-root user: this process only serves HTTP on an unprivileged
+# port and needs no host access, so it gets none. chown covers PROBATIO_DB
+# writing a file under /app too (default is ":memory:", no file at all).
+RUN useradd --no-create-home --uid 10001 appuser && chown -R appuser:appuser /app
+USER appuser
+
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s \
