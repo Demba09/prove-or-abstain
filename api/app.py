@@ -48,15 +48,15 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 
-from prove_or_abstain import ingest, memory, ratelimit, reference
-from prove_or_abstain.agent_loop import investigate_agentic
-from prove_or_abstain.autopilot import get_dashboard, record_check, resolve_execution, get_executions
-from prove_or_abstain.connectors.gsheets import SheetError
-from prove_or_abstain.connectors.gsheets import fetch_panel as fetch_sheet_panel
-from prove_or_abstain.connectors.sql import SqlQueryError, fetch_panel as fetch_sql_panel
-from prove_or_abstain.investigate import _jsonable, _run_investigation
-from prove_or_abstain.llm import get_client
-from prove_or_abstain.panels import (BASELINE, CLEAN, DEEP, DIFFUSE, MIXSHIFT,
+from prove_or_abstain import ingest, memory, ratelimit, reference  # noqa: E402
+from prove_or_abstain.agent_loop import investigate_agentic  # noqa: E402
+from prove_or_abstain.autopilot import get_dashboard, record_check, resolve_execution, get_executions  # noqa: E402
+from prove_or_abstain.connectors.gsheets import SheetError  # noqa: E402
+from prove_or_abstain.connectors.gsheets import fetch_panel as fetch_sheet_panel  # noqa: E402
+from prove_or_abstain.connectors.sql import SqlQueryError, fetch_panel as fetch_sql_panel  # noqa: E402
+from prove_or_abstain.investigate import _jsonable, _run_investigation, check_all_panels  # noqa: E402
+from prove_or_abstain.llm import get_client  # noqa: E402
+from prove_or_abstain.panels import (BASELINE, CLEAN, DEEP, DIFFUSE, MIXSHIFT,  # noqa: E402
                                      DEVICES, SEGMENTS, split_series)
 
 # docs_url=None frees /docs from the built-in Swagger route so the
@@ -552,21 +552,9 @@ def investigate_check() -> dict:
 
     An ASSERT+EXECUTE that fires creates an execution record visible at
     GET /dashboard and POST /executions/{id}/resolve."""
-    results = []
-    for panel_name, panel_df in _PANELS.items():
-        result = _run_investigation(
-            BASELINE, panel_df,
-            metrics=_METRICS,
-            dims=["device", "segment"],
-            autopilot=True,
-        )
-        result["panel"] = panel_name
-        results.append(result)
-
-    verdicts = [r["verdict"] for r in results]
-    summary_verdict = "ASSERT_ACTED" if "ASSERT" in verdicts else "NO_ANOMALY"
-    record_check(summary_verdict)
-    return {"verdict": summary_verdict, "panels": results}
+    summary = check_all_panels(_PANELS, BASELINE, _METRICS, ["device", "segment"])
+    record_check(summary["verdict"])
+    return summary
 
 
 @app.get("/dashboard", include_in_schema=True)

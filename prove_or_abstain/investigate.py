@@ -36,6 +36,23 @@ def _jsonable(v):
     return v
 
 
+def check_all_panels(panels: dict, baseline: pd.DataFrame,
+                     metrics: list[str], dims: list[str]) -> dict:
+    """Run the investigation on every supplied panel with autopilot ON.
+    Shared by the REST endpoint and the MCP server (avoiding duplication)."""
+    results = []
+    for panel_name, panel_df in panels.items():
+        result = _run_investigation(
+            baseline, panel_df,
+            metrics=metrics, dims=dims, autopilot=True,
+        )
+        result["panel"] = panel_name
+        results.append(result)
+    verdicts = [r["verdict"] for r in results]
+    summary_verdict = "ASSERT_ACTED" if "ASSERT" in verdicts else "NO_ANOMALY"
+    return {"verdict": summary_verdict, "panels": results}
+
+
 def _run_investigation(baseline: pd.DataFrame, current: pd.DataFrame,
                        metrics: list[str], dims: list[str],
                        autopilot: bool,

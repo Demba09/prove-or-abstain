@@ -1,0 +1,5 @@
+metric,sex,smoker,n,c
+good_tip,Female,No,2,1
+good_tip,Female,Yes,7,7
+good_tip,Male,No,2,1
+good_tip,Male,Yes,8,2

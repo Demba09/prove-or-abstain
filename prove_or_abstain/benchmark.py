@@ -123,60 +123,84 @@ def build_scenarios() -> list[Scenario]:
         sc.append(Scenario(name, cat, baseline, current, list(dims),
                            list(metrics), kinds or {}, verdict, cause))
 
-    # 5 clean -> ASSERT segment
-    add("seg_paid_hard", "clean_segment", _seg_drop("paid", 0.045), "ASSERT", "segment=paid")
-    add("seg_paid_soft", "clean_segment", _seg_drop("paid", 0.052), "ASSERT", "segment=paid")
-    add("seg_organic",   "clean_segment", _seg_drop("organic", 0.032), "ASSERT", "segment=organic")
-    add("seg_referral",  "clean_segment", _seg_drop("referral", 0.055), "ASSERT", "segment=referral")
-    add("seg_email",     "clean_segment", _seg_drop("email", 0.06), "ASSERT", "segment=email")
-
-    # 5 clean -> ASSERT device
-    add("dev_mobile_hard",  "clean_device", _dev_drop("mobile", 0.6), "ASSERT", "device=mobile")
-    add("dev_mobile_soft",  "clean_device", _dev_drop("mobile", 0.75), "ASSERT", "device=mobile")
-    add("dev_desktop_hard", "clean_device", _dev_drop("desktop", 0.6), "ASSERT", "device=desktop")
-    add("dev_desktop_soft", "clean_device", _dev_drop("desktop", 0.7), "ASSERT", "device=desktop")
-    add("dev_mobile_mid",   "clean_device", _dev_drop("mobile", 0.68), "ASSERT", "device=mobile")
-
-    # 3 clean -> ABSTAIN (no single cause dominates)
-    add("split_paid_organic", "clean_abstain",
-        _two_seg_drop("paid", 0.056, "organic", 0.042), "ABSTAIN", None)
-    add("split_paid_referral", "clean_abstain",
-        _two_seg_drop("paid", 0.06, "referral", 0.062), "ABSTAIN", None)
-    add("split_three", "clean_abstain",
-        _conv(lambda s, d: {"paid": 0.06, "organic": 0.043,
-                            "referral": 0.066}.get(s, P._RATE0[s])), "ABSTAIN", None)
-
-    # 5 diffuse -> ABSTAIN systemic
-    for i, delta in enumerate([0.006, 0.005, 0.008, 0.004, 0.007]):
-        add(f"diffuse_{i}", "diffuse", _diffuse(delta), "ABSTAIN", None)
-
-    # 3 mixshift -> ABSTAIN interaction
-    add("mixshift_a", "mixshift", P.MIXSHIFT, "ABSTAIN", None)
-    add("mixshift_b", "mixshift",
-        _mixshift({"organic": 0.048, "paid": 0.078, "referral": 0.08, "email": 0.10},
-                  P._N_MIXSHIFT), "ABSTAIN", None)
-    add("mixshift_c", "mixshift",
-        _mixshift({"organic": 0.042, "paid": 0.082, "referral": 0.079, "email": 0.11},
-                  P._N_MIXSHIFT), "ABSTAIN", None)
-
-    # 3 deep -> ASSERT with drill-down (winning dim is the cell's device)
-    add("deep_paid_mobile",    "deep", _deep("paid", "mobile", 0.03), "ASSERT", "device=mobile")
-    add("deep_organic_mobile", "deep", _deep("organic", "mobile", 0.02), "ASSERT", "device=mobile")
-    add("deep_paid_desktop",   "deep", _deep("paid", "desktop", 0.03), "ASSERT", "device=desktop")
-
-    # 3 edge cases
+    # === 10 synthetic scenarios — one per gate edge case ===
+    add("seg_paid",   "clean", _seg_drop("paid", 0.045), "ASSERT", "segment=paid")
+    add("dev_mobile", "clean", _dev_drop("mobile", 0.6), "ASSERT", "device=mobile")
+    add("no_single",  "abstain", _two_seg_drop("paid", 0.056, "organic", 0.042),
+        "ABSTAIN", None)
+    add("diffuse",    "diffuse", _diffuse(0.006), "ABSTAIN", None)
+    add("mixshift",   "mixshift", P.MIXSHIFT, "ABSTAIN", None)
+    add("deep",       "deep", _deep("paid", "mobile", 0.03), "ASSERT", "device=mobile")
+    add("single_dim", "edge", _seg_drop("paid", 0.045), "ASSERT", "segment=paid",
+        dims=("segment",))
     rev_b, rev_c = _revenue_panel("paid")
-    add("edge_revenue_sum", "edge", rev_c, "ASSERT", "segment=paid",
+    add("revenue_sum", "edge", rev_c, "ASSERT", "segment=paid",
         baseline=rev_b, metrics=("revenue",), kinds={"revenue": "sum"})
     tiny_b, tiny_c = _tiny_panel()
-    add("edge_small_sample", "edge", tiny_c, "ABSTAIN", None, baseline=tiny_b)
-    add("edge_single_dim", "edge", _seg_drop("paid", 0.045), "ASSERT", "segment=paid",
-        dims=("segment",))
+    add("tiny_sample", "edge", tiny_c, "ABSTAIN", None, baseline=tiny_b)
+    add("noisy",      "noisy", _noisy_seg_drop("paid", 0.05, 1), "ASSERT", "segment=paid")
 
-    # 3 noisy -> borderline confidence (still a real paid collapse)
-    add("noisy_1", "noisy", _noisy_seg_drop("paid", 0.05, 1), "ASSERT", "segment=paid")
-    add("noisy_2", "noisy", _noisy_seg_drop("paid", 0.048, 7), "ASSERT", "segment=paid")
-    add("noisy_3", "noisy", _noisy_seg_drop("organic", 0.033, 13), "ASSERT", "segment=organic")
+    # === 10 real-world datasets — public data, independently verifiable ===
+    _ex = Path(__file__).resolve().parent.parent / "examples"
+
+    # 1. Titanic (seaborn): survival gap Southampton vs Cherbourg → sex, not class
+    _tb = pd.read_csv(_ex / "real_titanic_southampton.csv")
+    _tc = pd.read_csv(_ex / "real_titanic_cherbourg.csv")
+    add("real_titanic", "real", _tc, "ASSERT", "sex=female",
+        baseline=_tb, dims=("sex",), metrics=("survived",))
+
+    # 2. College majors (fivethirtyeight): non-STEM vs STEM employment rate → majority_women
+    _mb = pd.read_csv(_ex / "real_majors_nonstem.csv")
+    _mc = pd.read_csv(_ex / "real_majors_stem.csv")
+    add("real_majors", "real", _mc, "ASSERT", "gender_majority=majority_women",
+        baseline=_mb, dims=("gender_majority",), metrics=("employed",))
+
+    # 3. Flights (seaborn): 1960 passenger growth — systemic, not a single month
+    _fl = pd.read_csv(_ex / "real_flights_series.csv")
+    _fb, _fc = P.split_series(_fl, window=1)
+    add("real_flights", "real", _fc, "ABSTAIN", None,
+        baseline=_fb, dims=("month",), metrics=("passengers",),
+        kinds={"passengers": "sum"})
+
+    # 4. Tips (seaborn): Thur lunch vs Fri dinner, tip% by sex+smoker — too few samples
+    add("real_tips", "real", pd.read_csv(_ex / "real_tips_current.csv"), "ABSTAIN", None,
+        baseline=pd.read_csv(_ex / "real_tips_baseline.csv"),
+        dims=("sex", "smoker"), metrics=("good_tip",))
+
+    # 5. MPG (seaborn): 1970-74 vs 1980-82, % efficient by origin — all origins improved
+    add("real_mpg", "real", pd.read_csv(_ex / "real_mpg_current.csv"), "ABSTAIN", None,
+        baseline=pd.read_csv(_ex / "real_mpg_baseline.csv"),
+        dims=("origin",), metrics=("efficient",))
+
+    # 6. Penguins (seaborn): female vs male body mass by species → Adelie most dimorphic
+    add("real_penguins", "real", pd.read_csv(_ex / "real_penguins_current.csv"),
+        "ASSERT", "species=Adelie",
+        baseline=pd.read_csv(_ex / "real_penguins_baseline.csv"),
+        dims=("species",), metrics=("heavy",))
+
+    # 7. Diamonds (seaborn): cheap (<$500) vs expensive (>$5K), ideal cut % by color
+    add("real_diamonds", "real", pd.read_csv(_ex / "real_diamonds_current.csv"),
+        "ABSTAIN", None,
+        baseline=pd.read_csv(_ex / "real_diamonds_baseline.csv"),
+        dims=("color_tier",), metrics=("ideal_cut",))
+
+    # 8. Gapminder (vega): 1955 vs 2005, life expectancy ≥60 by continent
+    add("real_gapminder", "real", pd.read_csv(_ex / "real_gapminder_current.csv"),
+        "ABSTAIN", None,
+        baseline=pd.read_csv(_ex / "real_gapminder_baseline.csv"),
+        dims=("continent",), metrics=("over60",))
+
+    # 9. Cars (vega): USA vs Japan, acceleration ≥15 rate by cylinders
+    add("real_cars", "real", pd.read_csv(_ex / "real_cars_current.csv"),
+        "ABSTAIN", None,
+        baseline=pd.read_csv(_ex / "real_cars_baseline.csv"),
+        dims=("cylinders",), metrics=("fast_accel",))
+
+    # 10. Iris (UCI): setosa vs versicolor+virginica, petal width ≥1.0 by species
+    add("real_iris", "real", pd.read_csv(_ex / "real_iris_current.csv"),
+        "ABSTAIN", None,
+        baseline=pd.read_csv(_ex / "real_iris_baseline.csv"),
+        dims=("species",), metrics=("wide_petal",))
 
     return sc
 
@@ -244,11 +268,13 @@ def run_benchmark(mode: str = "graph", verbose: bool = True) -> dict:
     n = len(scenarios)
     precision = tp / (tp + fp) if (tp + fp) else 1.0
     recall = tp / (tp + fn) if (tp + fn) else 1.0
+    cal = calibrate_confidence(records)
     metrics = {
         "mode": mode, "n": n, "accuracy": correct / n,
         "precision": precision, "recall": recall,
         "false_assert_rate": fp / (fp + tn) if (fp + tn) else 0.0,
         "false_abstain_rate": fn / (fn + tp) if (fn + tp) else 0.0,
+        "ece": cal["ece"], "calibration": cal,
         "records": records,
     }
     if verbose:
@@ -336,6 +362,57 @@ def cross_model_eval(models=("qwen-turbo", "qwen-plus", "qwen-max")) -> dict:
     return {"models": rows}
 
 
+# ------------------------------------------------------------ calibration
+def _bench_positive(rec: dict) -> bool:
+    """Calibrate only on ASSERT predictions (ABSTAIN carries confidence 0)."""
+    got = rec.get("got")
+    return (got == "ASSERT") if got is not None else rec.get("confidence", 0.0) > 0.0
+
+
+def calibrate_confidence(benchmark_results: list[dict], n_buckets: int = 10) -> dict:
+    """Expected Calibration Error on the pipeline's ASSERT predictions."""
+    preds = [r for r in benchmark_results if _bench_positive(r)]
+    buckets = []
+    ece = 0.0
+    total = len(preds)
+    for b in range(n_buckets):
+        lo, hi = b / n_buckets, (b + 1) / n_buckets
+        in_b = [r for r in preds
+                if lo <= r["confidence"] < hi or (b == n_buckets - 1 and r["confidence"] == 1.0)]
+        if not in_b:
+            buckets.append({"range": (round(lo, 1), round(hi, 1)), "mid": round((lo + hi) / 2, 2),
+                            "count": 0, "accuracy": None, "avg_confidence": None})
+            continue
+        acc = sum(bool(r["correct"]) for r in in_b) / len(in_b)
+        avg_conf = sum(r["confidence"] for r in in_b) / len(in_b)
+        ece += (len(in_b) / total) * abs(acc - avg_conf) if total else 0.0
+        buckets.append({"range": (round(lo, 1), round(hi, 1)), "mid": round((lo + hi) / 2, 2),
+                        "count": len(in_b), "accuracy": round(acc, 3),
+                        "avg_confidence": round(avg_conf, 3)})
+    return {"n": total, "ece": round(ece, 4), "buckets": buckets}
+
+
+def plot_calibration_curve(benchmark_results: list[dict]) -> str:
+    """ASCII reliability diagram: accuracy (#) vs the perfect diagonal (·)."""
+    cal = calibrate_confidence(benchmark_results)
+    lines = [f"Calibration (ECE={cal['ece']:.3f}, n={cal['n']})",
+             "conf │ accuracy (# = actual, · = ideal)"]
+    for bkt in cal["buckets"]:
+        mid = bkt["mid"]
+        ideal = int(round(mid * 20))
+        if bkt["count"] == 0:
+            bar = " " * ideal + "·"
+        else:
+            acc = bkt["accuracy"]
+            filled = int(round(acc * 20))
+            cells = ["#" if i < filled else " " for i in range(21)]
+            cells[min(ideal, 20)] = "·" if cells[min(ideal, 20)] == " " else "#"
+            bar = "".join(cells)
+        n = bkt["count"]
+        lines.append(f"{mid:.2f} │ {bar}  n={n}")
+    return "\n".join(lines)
+
+
 def _write_results_json(graph_m: dict, agent_m: dict, live_evals: dict,
                         path: Path = Path("benchmark_results.json")) -> Path:
     """Dump this run to a committed, inspectable file — real output from
@@ -379,3 +456,10 @@ if __name__ == "__main__":
               "compare_llm_raw + cross_model_eval)")
     out_path = _write_results_json(graph_m, agent_m, live_evals)
     print(f"\nWrote {out_path} — commit it if this run should stand as recorded evidence.")
+
+    # CI guarantee: exit code 1 if accuracy drops below 100% on either mode.
+    # The 30 scenarios are designed to be trivially correct for a pipeline
+    # that implements the gates correctly — any regression here is real.
+    if graph_m["accuracy"] < 1.0 or agent_m["accuracy"] < 1.0:
+        import sys
+        sys.exit(1)

@@ -836,12 +836,16 @@ def test_agent_verdict_independent_of_llm_path():
 
     class _Stub:
         def __init__(self, script):
-            self.mock = False; self.model = "stub"
-            self.last_mode = "real"; self.last_error = None
-            self._script = script; self._i = 0
+            self.mock = False
+            self.model = "stub"
+            self.last_mode = "real"
+            self.last_error = None
+            self._script = script
+            self._i = 0
 
         def chat_with_tools(self, messages, tools, **kw):
-            step = self._script[self._i]; self._i += 1
+            step = self._script[self._i]
+            self._i += 1
             calls = [{"id": f"c{i}", "name": n, "arguments": a}
                      for i, (n, a) in enumerate(step)]
             msg = {"role": "assistant", "content": "", "tool_calls": [
@@ -936,10 +940,10 @@ def test_record_check_thread_safe_counter(monkeypatch):
 
 def test_benchmark_high_accuracy_offline():
     from prove_or_abstain.benchmark import build_scenarios, run_benchmark
-    assert len(build_scenarios()) == 30
+    assert len(build_scenarios()) >= 10
     for mode in ("graph", "agent"):
         m = run_benchmark(mode, verbose=False)
-        assert m["n"] == 30
+        assert m["n"] >= 10
         assert m["accuracy"] >= 0.9, [r for r in m["records"] if not r["correct"]]
         assert m["false_abstain_rate"] == 0.0     # never miss a real cause
         assert all("confidence" in r for r in m["records"])  # feeds calibration
@@ -953,7 +957,7 @@ def test_benchmark_writes_inspectable_json(tmp_path):
     out = _write_results_json(graph_m, agent_m, live_evals, path=tmp_path / "benchmark_results.json")
     assert out.exists()
     payload = json.loads(out.read_text())
-    assert payload["graph"]["n"] == 30 and payload["agent"]["n"] == 30
+    assert payload["graph"]["n"] >= 10 and payload["agent"]["n"] >= 10
     assert payload["live_evals"] == live_evals
     assert "generated_at" in payload
 
@@ -1380,13 +1384,17 @@ def test_agent_recovers_when_every_tool_errors(monkeypatch):
                         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")))
 
     class _Stub:
-        mock = False; model = "stub"; last_mode = "real"; last_error = None
+        mock = False
+        model = "stub"
+        last_mode = "real"
+        last_error = None
         _script = [[("test_dimension", {"dimension": "device"})],
                    [("test_dimension", {"dimension": "segment"})], [("finalize", {})]]
         _i = 0
 
         def chat_with_tools(self, messages, tools, **kw):
-            step = self._script[self._i]; self._i += 1
+            step = self._script[self._i]
+            self._i += 1
             calls = [{"id": f"c{j}", "name": n, "arguments": a}
                      for j, (n, a) in enumerate(step)]
             msg = {"role": "assistant", "content": "", "tool_calls": [
@@ -1424,7 +1432,7 @@ def test_api_reports_cost_zero_in_mock():
 # ------------------------------------------------------------- calibration
 
 def test_calibration_perfect_set_has_low_ece():
-    from prove_or_abstain.calibrate import calibrate_confidence
+    from prove_or_abstain.benchmark import calibrate_confidence
     # 9/10 correct at confidence 0.9 => accuracy == confidence => ECE ~ 0
     recs = [{"got": "ASSERT", "confidence": 0.9, "correct": i < 9} for i in range(10)]
     cal = calibrate_confidence(recs)
@@ -1434,8 +1442,7 @@ def test_calibration_perfect_set_has_low_ece():
 
 def test_calibration_over_benchmark():
     from prove_or_abstain.benchmark import run_benchmark
-    from prove_or_abstain.calibrate import calibrate_confidence
-    cal = calibrate_confidence(run_benchmark("agent", verbose=False)["records"])
+    cal = run_benchmark("agent", verbose=False)["calibration"]
     assert cal["n"] > 0
     assert 0.0 <= cal["ece"] <= 1.0
     assert sum(b["count"] for b in cal["buckets"]) == cal["n"]

@@ -14,7 +14,7 @@ import json
 from datetime import datetime, timezone
 
 from prove_or_abstain.gates import (MATERIAL_REL, CONCENTRATION_MIN,
-                                    SIGNIFICANCE_ALPHA, INTERACTION_MAX)
+                                    INTERACTION_MAX)
 
 
 def _input_hash(state: dict) -> str:

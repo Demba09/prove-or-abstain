@@ -17,7 +17,6 @@ import json
 import os
 import sys
 from dataclasses import asdict
-from typing import Any
 
 try:
     from mcp.server.fastmcp import FastMCP
@@ -29,9 +28,9 @@ except ImportError:
 
 # --- import the prove-or-abstain pipeline (same as the REST API) ---
 sys.path.insert(0, os.path.dirname(__file__))
-from api.app import _METRICS, _PANELS, _run_investigation
-from prove_or_abstain.autopilot import get_dashboard as autopilot_dashboard, resolve_execution
-from prove_or_abstain.llm import get_client
+from api.app import _METRICS, _PANELS                               # panel data lives in api/app
+from prove_or_abstain.investigate import _run_investigation, check_all_panels
+from prove_or_abstain.autopilot import get_dashboard as autopilot_dashboard, resolve_execution, record_check
 from prove_or_abstain.panels import BASELINE
 
 mcp = FastMCP(
@@ -96,7 +95,7 @@ def investigate_sql(dsn: str, baseline_query: str, current_query: str) -> str:
     except SqlQueryError as e:
         return json.dumps({"error": f"SQL error: {e}"})
 
-    from api.app import _RESERVED, _parse_kinds
+    from api.app import _RESERVED
     dims = [c for c in base.columns if c not in _RESERVED]
     metrics = sorted(base["metric"].unique())
     result = _run_investigation(base, curr, metrics=metrics, dims=dims,
@@ -112,22 +111,9 @@ def autonomous_check() -> str:
     record is created (visible via get_dashboard).
 
     Returns summary of all 4 investigations as JSON."""
-    results = []
-    for panel_name, panel_df in _PANELS.items():
-        result = _run_investigation(
-            BASELINE, panel_df,
-            metrics=_METRICS,
-            dims=["device", "segment"],
-            autopilot=True,
-        )
-        result["panel"] = panel_name
-        results.append(result)
-
-    from prove_or_abstain.autopilot import record_check
-    verdicts = [r["verdict"] for r in results]
-    summary = "ASSERT_ACTED" if "ASSERT" in verdicts else "NO_ANOMALY"
-    record_check(summary)
-    return json.dumps({"verdict": summary, "panels": results}, ensure_ascii=False, default=str)
+    summary = check_all_panels(_PANELS, BASELINE, _METRICS, ["device", "segment"])
+    record_check(summary["verdict"])
+    return json.dumps(summary, ensure_ascii=False, default=str)
 
 
 @mcp.tool(name="get_dashboard")

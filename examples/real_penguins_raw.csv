@@ -1,0 +1,9 @@
+species,island,bill_length_mm,flipper_length_mm,body_mass_g,sex
+Adelie,Torgersen,39.1,181.0,3750.0,MALE
+Adelie,Torgersen,39.5,186.0,3800.0,FEMALE
+Adelie,Torgersen,40.3,195.0,3250.0,FEMALE
+Adelie,Torgersen,36.7,193.0,3450.0,FEMALE
+Adelie,Torgersen,39.3,190.0,3650.0,MALE
+Adelie,Torgersen,38.9,181.0,3625.0,FEMALE
+Adelie,Torgersen,39.2,195.0,4675.0,MALE
+Adelie,Torgersen,41.1,182.0,3200.0,FEMALE
