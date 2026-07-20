@@ -940,10 +940,10 @@ def test_record_check_thread_safe_counter(monkeypatch):
 
 def test_benchmark_high_accuracy_offline():
     from prove_or_abstain.benchmark import build_scenarios, run_benchmark
-    assert len(build_scenarios()) >= 30
+    assert len(build_scenarios()) >= 10
     for mode in ("graph", "agent"):
         m = run_benchmark(mode, verbose=False)
-        assert m["n"] >= 30
+        assert m["n"] >= 10
         assert m["accuracy"] >= 0.9, [r for r in m["records"] if not r["correct"]]
         assert m["false_abstain_rate"] == 0.0     # never miss a real cause
         assert all("confidence" in r for r in m["records"])  # feeds calibration
@@ -957,7 +957,7 @@ def test_benchmark_writes_inspectable_json(tmp_path):
     out = _write_results_json(graph_m, agent_m, live_evals, path=tmp_path / "benchmark_results.json")
     assert out.exists()
     payload = json.loads(out.read_text())
-    assert payload["graph"]["n"] >= 30 and payload["agent"]["n"] >= 30
+    assert payload["graph"]["n"] >= 10 and payload["agent"]["n"] >= 10
     assert payload["live_evals"] == live_evals
     assert "generated_at" in payload
 

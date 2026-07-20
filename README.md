@@ -6,7 +6,7 @@
 # prove-or-abstain
 
 [![CI](https://github.com/Demba09/prove-or-abstain/actions/workflows/ci.yml/badge.svg)](https://github.com/Demba09/prove-or-abstain/actions)
-[![benchmark](https://img.shields.io/badge/benchmark-100%25%20(33%2F33)-brightgreen.svg)](#benchmark)
+[![benchmark](https://img.shields.io/badge/benchmark-100%25%20(20%2F20)-brightgreen.svg)](#benchmark)
 [![false-ASSERT](https://img.shields.io/badge/false--ASSERT-0%25-brightgreen.svg)](#benchmark)
 [![calibration](https://img.shields.io/badge/ECE-0.19-blue.svg)](#calibration)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -247,10 +247,9 @@ anything lower downgrades to RECOMMEND. Every EXECUTE is recorded in the audit t
 
 ## Benchmark
 
-33 scenarios — 30 synthetic with **known ground truth derived from how each panel is
-generated** (a paid-only collapse ⇒ `ASSERT segment=paid`; a uniform drop ⇒
-`ABSTAIN`) plus 3 real-world public datasets (Titanic, college majors, airline flights)
-with independently verifiable outcomes. Run it yourself, offline, in ~2 seconds — it also writes
+20 scenarios — 10 synthetic (one per gate edge case) and 10 real-world public datasets
+(seaborn, vega, UCI, fivethirtyeight) with independently verifiable outcomes. Run it
+yourself, offline, in ~2 seconds — it also writes
 [`benchmark_results.json`](benchmark_results.json), a committed, inspectable
 record of the actual run:
 
@@ -259,17 +258,18 @@ python -m prove_or_abstain.benchmark
 ```
 
 | Category | Scenarios | Expected | Result |
-|---|---|---|---|
-| clean → localizes on segment | 5 | ASSERT segment | 5/5 ✅ |
-| clean → localizes on device | 5 | ASSERT device | 5/5 ✅ |
-| clean → no dominant cause | 3 | ABSTAIN | 3/3 ✅ |
-| diffuse (systemic) | 5 | ABSTAIN | 5/5 ✅ |
-| mixshift (entangled) | 3 | ABSTAIN | 3/3 ✅ |
-| deep (ASSERT + drill-down) | 3 | ASSERT device | 3/3 ✅ |
-| edge (small-n, sum metric, single dim) | 3 | mixed | 3/3 ✅ |
-| noisy (borderline confidence) | 3 | ASSERT | 3/3 ✅ |
-| real data (Titanic, majors, flights) | 3 | mixed | 3/3 ✅ |
+|---|---|---|---|---|
+| clean → ASSERT segment or device | 2 | ASSERT | 2/2 ✅ |
+| abstain (no single cause) | 1 | ABSTAIN | 1/1 ✅ |
+| diffuse (systemic) | 1 | ABSTAIN | 1/1 ✅ |
+| mixshift (entangled) | 1 | ABSTAIN | 1/1 ✅ |
+| deep (ASSERT + drill-down) | 1 | ASSERT | 1/1 ✅ |
+| edge (sum metric, tiny sample, single dim) | 3 | mixed | 3/3 ✅ |
+| noisy (borderline confidence) | 1 | ASSERT | 1/1 ✅ |
+| real data (Titanic, majors, penguins, flights, tips, mpg, diamonds, gapminder, cars, iris) | 10 | mixed | 10/10 ✅ |
 
+```
+accuracy = 100% (20/20)   false-ASSERT = 0%   false-ABSTAIN = 0%
 ```
 accuracy = 100% (33/33)   false-ASSERT = 0%   false-ABSTAIN = 0%
 ```
@@ -443,7 +443,7 @@ prove_or_abstain/   core package — the deterministic pipeline
   investigate.py      shared state-building/graph-invocation tail (api/app.py + ingest.py)
   webhook.py          outbound notifications on EXECUTE
   cost_tracker.py     token counting + cost estimation
-   benchmark.py        33 ground-truth scenarios (30 synthetic + 3 real) + cross-model eval + ECE calibration
+   benchmark.py        20 ground-truth scenarios (10 synthetic + 10 real) + cross-model eval + ECE calibration
   audit.py            reproducible, verifiable audit trails
   evidence.py         synthetic operational-event lookup, grounds ASSERT speculation
   connectors/         SQL (Postgres/MySQL/SQLite) and Google Sheets
