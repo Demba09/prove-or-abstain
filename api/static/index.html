@@ -130,6 +130,22 @@ button.primary:hover { background: var(--accent-strong); border-color: var(--acc
 button.secondary { border: 1px solid var(--line); background: var(--card); color: var(--accent-strong); }
 button.secondary:hover { border-color: var(--accent); }
 button:disabled { opacity: .5; cursor: wait; }
+/* the one button that initiated the in-flight request gets a spinner, so a
+   slow connection shows progress instead of a frozen-looking page. Appended
+   after the label (not replacing it) and uses currentColor, so it reads on
+   both the light secondary buttons and the accent-filled tabs. */
+@keyframes spin { to { transform: rotate(360deg); } }
+button.loading { opacity: 1; }
+button.loading::after {
+  content: ""; display: inline-block; vertical-align: middle;
+  width: 11px; height: 11px; margin-left: 8px; border-radius: 50%;
+  border: 2px solid currentColor; border-top-color: transparent;
+  animation: spin .6s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { button.loading::after { animation-duration: 2s; } }
+.mini-help { margin: -2px 0 8px; }
+.mini-help > summary { cursor: pointer; font-size: 12px; color: var(--accent-strong); user-select: none; width: fit-content; }
+.mini-help[open] > summary { margin-bottom: 4px; }
 .routing-note { font-size: 12.5px; color: var(--muted); margin-top: 8px; }
 .routing-note b { color: var(--ink); }
 
@@ -149,6 +165,14 @@ button:disabled { opacity: .5; cursor: wait; }
 .stamp.assert { color: var(--assert); background: var(--assert-bg); }
 .stamp.abstain { color: var(--abstain); background: var(--abstain-bg); }
 .stamp.none { color: var(--muted); background: var(--panel-alt); border-style: solid; }
+/* cold-start "seeded" state: deliberately NOT the big rotated verdict stamp
+   (that read as a fake ASSERT/ABSTAIN before) — a small neutral status pill,
+   clearly a confirmation, not a verdict. */
+.stamp.seeded {
+  font-size: 13px; font-weight: 700; letter-spacing: .05em; padding: 5px 13px;
+  border-radius: 999px; transform: none; border: 1px solid var(--assert);
+  color: var(--assert); background: var(--assert-bg);
+}
 .verdict-meta { color: var(--muted); font-size: 13.5px; }
 .verdict-meta.cold-start { color: var(--ink); font-size: 15px; }
 .verdict-meta b { color: var(--ink); }
@@ -267,8 +291,14 @@ footer a { color: var(--accent-strong); }
 .dash-alert .info .meta { font-size: 12.5px; color: var(--muted); }
 .dash-alert .resolve-btn { font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 6px; cursor: pointer; border: 1px solid var(--accent); background: var(--card); color: var(--accent); }
 .dash-alert .resolve-btn:hover { background: var(--accent); color: #fff; }
+/* two-step inline confirm (no native confirm() dialog — keeps the app's own
+   visual language, same reason runAutonomousCheck stopped using alert()). */
+.dash-alert .resolve-btn.confirming { border-color: var(--abstain); background: var(--abstain); color: #fff; }
 .dash-alert .resolved-tag { font-size: 12px; color: var(--assert); font-weight: 600; }
 .dash-empty { color: var(--muted); font-size: 13.5px; padding: 8px 0; }
+.dash-check-result { font-size: 13px; margin-bottom: 14px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 13px; background: var(--panel-alt); display: none; }
+.dash-check-result .title { font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.dash-check-result ul { margin: 0; padding-left: 16px; font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: 12px; line-height: 1.7; }
 </style>
 </head>
 <body>
@@ -294,8 +324,8 @@ footer a { color: var(--accent-strong); }
         <span class="track"></span>
         autopilot (execute at confidence &ge; 0.70)
       </label>
-      <span class="mode-select" role="group" aria-label="Orchestration mode">
-        <span class="mode-label">orchestration</span>
+      <span class="mode-select" role="group" aria-label="Investigation mode">
+        <span class="mode-label" title="graph = fixed pipeline; agent = Qwen drives the investigation via tool calls">investigation mode</span>
         <button type="button" class="mode-btn" id="mode-graph" data-mode="graph" aria-pressed="true">graph</button>
         <button type="button" class="mode-btn" id="mode-agent" data-mode="agent" aria-pressed="false">agent (Qwen drives)</button>
       </span>
@@ -304,10 +334,14 @@ footer a { color: var(--accent-strong); }
     <div class="divider"></div>
 
     <p class="eyebrow">Watch a source — no baseline file needed</p>
-    <p class="field-label" style="margin:-4px 0 8px;">Send one observation at a time, tagged with an id you choose.
-      The first call for a new id only seeds it; every call after that is compared automatically to everything
-      persisted so far for that id — the baseline lives in the database, not in a file you re-upload. Columns
-      don't have to match <code>metric, dims..., n, c</code> exactly — Qwen maps unfamiliar ones.</p>
+    <p class="field-label" style="margin:-4px 0 6px;">Send one observation at a time under an id you choose; each new one is
+      compared automatically to everything already stored for that id.</p>
+    <details class="mini-help">
+      <summary>how the baseline works</summary>
+      <p class="field-label" style="margin:0 0 8px;">The first call for a new id only seeds it; from the second on,
+        the baseline lives in the database (not a file you re-upload) and grows with each call. Columns don't have
+        to match <code>metric, dims..., n, c</code> exactly — Qwen maps unfamiliar ones.</p>
+    </details>
     <div class="upload-row">
       <div class="field">
         <label class="field-label" for="sourceId">Source id — reuse it across calls to build history</label>
@@ -403,6 +437,7 @@ footer a { color: var(--accent-strong); }
       <div class="dash-header">
         <button class="secondary" type="button" id="dash-check-btn" onclick="runAutonomousCheck()">run autonomous check</button>
       </div>
+      <div class="dash-check-result" id="dash-check-result" aria-live="polite"></div>
       <div class="dash-stats" id="dash-stats"></div>
       <div id="dash-alerts"></div>
       <div class="dash-empty" id="dash-empty">Loading&hellip;</div>
@@ -438,7 +473,10 @@ function updateQueryLabel() {
   }
 }
 
-function setBusy(b) { document.querySelectorAll('button').forEach(x => x.disabled = b); }
+function setBusy(b, btn) {
+  document.querySelectorAll('button').forEach(x => x.disabled = b);
+  if (btn) btn.classList.toggle('loading', b);   // spinner only on the one that fired
+}
 function fail(msg) { $('error').style.display = 'block'; $('error').textContent = msg; }
 function clearFail() { $('error').style.display = 'none'; }
 
@@ -447,9 +485,9 @@ function setActiveTab(panel) {
   document.querySelectorAll('.tab').forEach(t => t.setAttribute('aria-pressed', String(t.dataset.panel === panel)));
 }
 
-async function call(url, opts) {
+async function call(url, opts, btn) {
   clearFail();
-  setBusy(true);
+  setBusy(true, btn);
   try {
     const r = await fetch(url, opts);
     const body = await r.json();
@@ -459,17 +497,17 @@ async function call(url, opts) {
   } catch (e) {
     fail(e.message);
   } finally {
-    setBusy(false);
+    setBusy(false, btn);
   }
 }
 
-function runPanel(panel) {
+function runPanel(panel, btn) {
   setActiveTab(panel);
   call('/investigate', {
     method: 'POST',
     headers: {'content-type': 'application/json'},
     body: JSON.stringify({panel, autopilot: $('autopilot').checked, mode: orchestrationMode}),
-  });
+  }, btn);
 }
 
 function runQuery() {
@@ -483,7 +521,7 @@ function runQuery() {
     method: 'POST',
     headers: {'content-type': 'application/json'},
     body: JSON.stringify(payload),
-  });
+  }, $('askBtn'));
 }
 
 function runUpload() {
@@ -494,7 +532,7 @@ function runUpload() {
   fd.append('baseline', base);
   fd.append('current', curr);
   fd.append('autopilot', $('autopilot').checked);
-  call('/investigate/upload', {method: 'POST', body: fd});
+  call('/investigate/upload', {method: 'POST', body: fd}, $('uploadBtn'));
 }
 
 function runObserve() {
@@ -506,7 +544,7 @@ function runObserve() {
   fd.append('panel', obs);
   fd.append('autopilot', $('autopilot').checked);
   fd.append('mode', orchestrationMode);
-  call(`/sources/${encodeURIComponent(sourceId)}/observe`, {method: 'POST', body: fd});
+  call(`/sources/${encodeURIComponent(sourceId)}/observe`, {method: 'POST', body: fd}, $('observeBtn'));
 }
 
 function render(b) {
@@ -530,10 +568,11 @@ function render(b) {
 
   const v = b.verdict || 'NO_ANOMALY';
   const stamp = $('verdict');
+  stamp.style.display = '';
   if (b.cold_start) {
-    stamp.style.display = 'none';
+    stamp.textContent = 'SEEDED ✓';                       // a status pill, not a verdict stamp
+    stamp.className = 'stamp seeded';
   } else {
-    stamp.style.display = '';
     stamp.textContent = v;
     stamp.className = 'stamp ' + (v === 'ASSERT' ? 'assert' : v === 'ABSTAIN' ? 'abstain' : 'none');
   }
@@ -746,7 +785,7 @@ async function showDataset(body) {
   renderDatasetTable(rates);
 }
 
-document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => runPanel(t.dataset.panel)));
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => runPanel(t.dataset.panel, t)));
 $('mode-graph').addEventListener('click', () => setMode('graph'));
 $('mode-agent').addEventListener('click', () => setMode('agent'));
 $('askBtn').addEventListener('click', runQuery);
@@ -812,7 +851,22 @@ function renderDashboard(d) {
       const btn = document.createElement('button');
       btn.className = 'resolve-btn';
       btn.textContent = 'resolve';
-      btn.onclick = function() { resolveAlert(a.id); };
+      // two-step: first click arms "confirm?", second within 3s resolves —
+      // guards a misclick without an OS-native confirm() dialog.
+      let armed = null;
+      btn.onclick = function() {
+        if (btn.classList.contains('confirming')) {
+          clearTimeout(armed);
+          resolveAlert(a.id);
+          return;
+        }
+        btn.classList.add('confirming');
+        btn.textContent = 'confirm?';
+        armed = setTimeout(function() {
+          btn.classList.remove('confirming');
+          btn.textContent = 'resolve';
+        }, 3000);
+      };
       el.appendChild(btn);
     }
     alerts.appendChild(el);
@@ -832,18 +886,22 @@ async function resolveAlert(id) {
 
 async function runAutonomousCheck() {
   clearFail();
-  setBusy(true);
+  setBusy(true, $('dash-check-btn'));
   try {
     const r = await fetch('/investigate/check', {method: 'POST'});
     const body = await r.json();
     if (!r.ok) throw new Error(body.detail || r.statusText);
-    alert('Autonomous check complete: ' + body.verdict + '\n' +
-      body.panels.map(p => '  ' + p.panel + ' → ' + p.verdict + ' (' + p.action.kind + ')').join('\n'));
+    const box = $('dash-check-result');                   // inline, in-app — not window.alert()
+    box.style.display = 'block';
+    box.innerHTML =
+      `<div class="title">autonomous check — ${body.verdict}</div>
+       <ul>${body.panels.map(p =>
+         `<li>${p.panel} → ${p.verdict} (${p.action.kind})</li>`).join('')}</ul>`;
     loadDashboard();
   } catch (e) {
     fail(e.message);
   } finally {
-    setBusy(false);
+    setBusy(false, $('dash-check-btn'));
   }
 }
 
