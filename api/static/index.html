@@ -416,9 +416,39 @@ footer a { color: var(--accent-strong); }
     </div>
   </div>
 
+  <div class="panel" style="margin-top:20px;">
+    <p class="eyebrow">Not just a demo — a workflow component</p>
+    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; font-size:12.5px; color:var(--muted);">
+      <div style="border:1px solid var(--line); border-radius:7px; padding:10px 12px;">
+        <span style="color:var(--ink); font-weight:600;">📡 REST API</span><br>
+        16 endpoints — any scheduler,<br>CI pipeline, or monitoring tool<br>can call <code>POST /investigate</code>
+      </div>
+      <div style="border:1px solid var(--line); border-radius:7px; padding:10px 12px;">
+        <span style="color:var(--ink); font-weight:600;">🧠 MCP server</span><br>
+        Qwen Cloud agents use<br><code>investigate_scenario</code>,<br><code>investigate_sql</code> as tools
+      </div>
+      <div style="border:1px solid var(--line); border-radius:7px; padding:10px 12px;">
+        <span style="color:var(--ink); font-weight:600;">🔌 Live connectors</span><br>
+        SQL (Postgres/MySQL/SQLite)<br>
+        Google Sheets<br>
+        CSV upload · Watch a source
+      </div>
+      <div style="border:1px solid var(--line); border-radius:7px; padding:10px 12px;">
+        <span style="color:var(--ink); font-weight:600;">🔔 Webhooks</span><br>
+        Slack · Discord · Teams<br>
+        Auto-formatted EXECUTE<br>notifications on every action
+      </div>
+      <div style="border:1px solid var(--line); border-radius:7px; padding:10px 12px;">
+        <span style="color:var(--ink); font-weight:600;">🐳 Docker</span><br>
+        One container · one port<br>
+        Non-root user · HEALTHCHECK<br>
+        Alibaba Cloud FC ready
+      </div>
+    </div>
+  </div>
+
   <footer>
-    Every number comes from pandas/numpy; the LLM only orders the dimensions to try, routes free-text
-    questions to a panel or segment, and phrases the report. <a href="/docs">API docs</a>
+    <a href="/docs">API docs</a> · <a href="https://github.com/Demba09/prove-or-abstain">GitHub</a>
   </footer>
 </main>
 
