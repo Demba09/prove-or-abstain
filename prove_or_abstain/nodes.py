@@ -22,7 +22,7 @@ from prove_or_abstain.metrics import aggregate
 from prove_or_abstain.gates import evaluate_gates, MATERIAL_REL
 from prove_or_abstain.agent_state import AgentState, MetricAnomaly, Action
 from prove_or_abstain.panels import metric_totals, project
-from prove_or_abstain.llm import get_client, template_report
+from prove_or_abstain.llm import get_client
 from prove_or_abstain.evidence import find_events
 
 
