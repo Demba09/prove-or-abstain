@@ -100,6 +100,26 @@ _METRICS = ["conversion", "activation"]
 # a filter among these, never invent one outside them.
 _DIM_VALUES = {"device": DEVICES, "segment": SEGMENTS}
 _STATIC = Path(__file__).parent / "static"
+_EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
+
+# One-click real-world proof, alongside the 4 synthetic panels: same pipeline,
+# same gates, on a real (not planted) dataset with a documented outcome —
+# see README's "Tested against real data" section. baseline/current are the
+# seaborn-data titanic.csv passenger manifest split by embarkation port.
+_EXAMPLES = {
+    "titanic": {
+        "baseline": "real_titanic_southampton.csv",
+        "current": "real_titanic_cherbourg.csv",
+        "sum_metrics": "",
+        "blurb": "real Titanic passengers, not planted → ASSERT sex=female",
+    },
+    "taxis": {
+        "baseline": "real_taxis_weekday.csv",
+        "current": "real_taxis_weekend.csv",
+        "sum_metrics": "",
+        "blurb": "real NYC taxi tips, not planted → ASSERT color=green",
+    },
+}
 _REQUIRED = {"metric", "n", "c"}             # mandatory long-panel columns
 _RESERVED = _REQUIRED | {"period"}           # non-dimension columns
 
@@ -351,6 +371,12 @@ def _read_panel(upload: UploadFile, name: str) -> pd.DataFrame:
     return _validate_panel(df, name)
 
 
+def _read_example(filename: str, name: str) -> pd.DataFrame:
+    """Like _read_panel, but for a committed examples/ CSV — no upload."""
+    df = pd.read_csv(_EXAMPLES_DIR / filename)
+    return _validate_panel(df, name)
+
+
 def _parse_kinds(sum_metrics: str, metrics: list[str]) -> dict:
     """Form field 'sum_metrics': comma-separated names of the SUM-kind
     metrics (revenue...). Everything else stays a rate."""
@@ -403,6 +429,21 @@ def investigate_upload(baseline: UploadFile = File(...),
     result = _investigate_pair(base, curr, "baseline", "current",
                                autopilot, sum_metrics)
     return {"panel": "upload", "dataset": _dataset_payload(base, curr), **result}
+
+
+@app.post("/investigate/example")
+def investigate_example(name: str = Form(...), autopilot: bool = Form(False)) -> dict:
+    """One-click real-world proof: run the same pipeline on a committed,
+    real (not planted) dataset instead of a synthetic panel or an upload.
+    See _EXAMPLES / README's "Tested against real data" section."""
+    spec = _EXAMPLES.get(name)
+    if spec is None:
+        raise HTTPException(404, f"no example dataset {name!r} — known: {sorted(_EXAMPLES)}")
+    base = _read_example(spec["baseline"], f"example:{name} baseline")
+    curr = _read_example(spec["current"], f"example:{name} current")
+    result = _investigate_pair(base, curr, f"example:{name} baseline",
+                               f"example:{name} current", autopilot, spec["sum_metrics"])
+    return {"panel": f"example:{name}", "dataset": _dataset_payload(base, curr), **result}
 
 
 @app.post("/investigate/sql")

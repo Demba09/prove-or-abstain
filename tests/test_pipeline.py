@@ -1364,6 +1364,45 @@ def test_real_titanic_survival_gap_localizes_to_sex_not_class():
     assert body["action"]["kind"] == "RECOMMEND"               # too low-confidence to auto-execute
 
 
+def test_example_titanic_matches_upload():
+    """POST /investigate/example is the one-click UI path to the same real
+    dataset test_real_titanic_survival_gap_localizes_to_sex_not_class()
+    exercises via upload — same files, must reach the same verdict."""
+    r = client.post("/investigate/example", data={"name": "titanic"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["panel"] == "example:titanic"
+    assert body["verdict"] == "ASSERT"
+    assert body["root_cause"] == {"dimension": "sex", "segment": "female"}
+    assert body["dataset"]["baseline"] and body["dataset"]["current"]  # UI chart has data to draw
+
+
+def test_example_taxis_tip_rate_localizes_to_green_cabs():
+    """seaborn-data's taxis.csv (NYC TLC trip records): real fares and tips,
+    restricted to credit-card payments (cash tips aren't reliably recorded
+    in this data — a methodology choice, not cherry-picking the split).
+    Weekday vs weekend tip rate moves +3.0pp overall; pickup_borough alone
+    ABSTAINs (concentration=0.48, p=0.081) but color localizes cleanly:
+    green cabs' tip rate jumps 48.75% -> 64.4% while yellow (95% of volume,
+    already near-ceiling at ~95%) barely moves — real, not planted, and
+    confidence stays low enough (0.30) to stay a RECOMMEND, not an EXECUTE."""
+    r = client.post("/investigate/example", data={"name": "taxis"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["panel"] == "example:taxis"
+    assert body["verdict"] == "ASSERT"
+    assert body["root_cause"] == {"dimension": "color", "segment": "green"}
+    assert body["gates"]["pickup_borough"]["verdict"] == "ABSTAIN"  # doesn't localize by borough alone
+    assert body["action"]["kind"] == "RECOMMEND"                    # too low-confidence to auto-execute
+
+
+def test_example_unknown_name_404s():
+    r = client.post("/investigate/example", data={"name": "not-a-real-example"})
+    assert r.status_code == 404
+    detail = r.json()["detail"]
+    assert "titanic" in detail and "taxis" in detail  # names the ones that DO exist
+
+
 def test_real_college_majors_stem_gap_localizes_to_gender_majority():
     """fivethirtyeight/college-majors' recent-grads.csv: 173 real US majors,
     each with real (not invented) total/employed counts. Splitting on the
