@@ -149,7 +149,7 @@ button:disabled { opacity: .5; cursor: wait; }
   border-radius: 7px; padding: 10px 12px; margin-top: 12px; font-size: 13.5px; display: none;
 }
 
-#result { display: none; }
+#result { display: none; margin-bottom: 8px; }
 
 .verdict-block { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; margin-bottom: 4px; }
 .stamp {
@@ -313,52 +313,54 @@ footer a { color: var(--accent-strong); }
 
     <div class="divider"></div>
 
-    <p class="eyebrow">Watch a source — no baseline file needed</p>
-    <p class="field-label" style="margin:-4px 0 8px;">Send one observation at a time, tagged with an id you choose.
-      The first call for a new id only seeds it; every call after that is compared automatically to everything
-      persisted so far for that id — the baseline lives in the database, not in a file you re-upload. Columns
-      don't have to match <code>metric, dims..., n, c</code> exactly — Qwen maps unfamiliar ones.</p>
-    <div class="upload-row">
-      <div class="field">
-        <label class="field-label" for="sourceId">Source id — reuse it across calls to build history</label>
-        <input type="text" id="sourceId" placeholder="my-dashboard-metric" value="demo-source">
-      </div>
-      <div class="field">
-        <label class="field-label" for="observation">One observation — same long-panel shape, or a raw source</label>
-        <input type="file" id="observation" accept=".csv">
-      </div>
-      <div class="field">
-        <label class="field-label" for="sumMetrics">Sum metrics (comma-separated, e.g. revenue)</label>
-        <input type="text" id="sumMetrics" placeholder="— only if c > n">
-      </div>
-      <button class="secondary" type="button" id="observeBtn">send observation</button>
-    </div>
-
-    <div class="divider"></div>
-
-    <p class="eyebrow">Ask in plain English</p>
-    <div class="query-row">
-      <div class="field">
-        <label class="field-label" for="query" id="queryLabel">Qwen picks which built-in scenario to investigate — it never computes anything itself</label>
-        <input type="text" id="query" placeholder="why did conversion drop uniformly last week?">
-      </div>
-      <button class="secondary" type="button" id="askBtn">ask</button>
-    </div>
-    <p class="routing-note" id="routing" style="display:none;"></p>
-
-    <div class="divider"></div>
-
-    <details class="advanced" id="advancedToggle">
-      <summary>Advanced — upload two CSVs to compare directly, or switch orchestration mode</summary>
+    <details class="advanced" id="moreToggle">
+      <summary>More — watch a source, ask in plain English, upload CSVs directly, or switch orchestration mode</summary>
       <div class="advanced-body">
-        <div class="row" style="margin:8px 0;">
+        <div class="row" style="margin:8px 0 18px;">
           <span class="mode-select" role="group" aria-label="Orchestration mode">
             <span class="mode-label">mode</span>
             <button type="button" class="mode-btn" id="mode-agent-adv" data-mode="agent" aria-pressed="true">agent</button>
             <button type="button" class="mode-btn" id="mode-graph-adv" data-mode="graph" aria-pressed="false">graph</button>
           </span>
         </div>
-        <p class="field-label" style="margin:8px 0;">A one-off comparison with no persisted history — for that,
+
+        <p class="eyebrow">Watch a source — no baseline file needed</p>
+        <p class="field-label" style="margin:-4px 0 8px;">Send one observation at a time, tagged with an id you choose.
+          The first call for a new id only seeds it; every call after that is compared automatically to everything
+          persisted so far for that id — the baseline lives in the database, not in a file you re-upload. Columns
+          don't have to match <code>metric, dims..., n, c</code> exactly — Qwen maps unfamiliar ones.</p>
+        <div class="upload-row">
+          <div class="field">
+            <label class="field-label" for="sourceId">Source id — reuse it across calls to build history</label>
+            <input type="text" id="sourceId" placeholder="my-dashboard-metric" value="demo-source">
+          </div>
+          <div class="field">
+            <label class="field-label" for="observation">One observation — same long-panel shape, or a raw source</label>
+            <input type="file" id="observation" accept=".csv">
+          </div>
+          <div class="field">
+            <label class="field-label" for="sumMetrics">Sum metrics (comma-separated, e.g. revenue)</label>
+            <input type="text" id="sumMetrics" placeholder="— only if c > n">
+          </div>
+          <button class="secondary" type="button" id="observeBtn">send observation</button>
+        </div>
+
+        <div class="divider"></div>
+
+        <p class="eyebrow">Ask in plain English</p>
+        <div class="query-row">
+          <div class="field">
+            <label class="field-label" for="query" id="queryLabel">Qwen picks which built-in scenario to investigate — it never computes anything itself</label>
+            <input type="text" id="query" placeholder="why did conversion drop uniformly last week?">
+          </div>
+          <button class="secondary" type="button" id="askBtn">ask</button>
+        </div>
+        <p class="routing-note" id="routing" style="display:none;"></p>
+
+        <div class="divider"></div>
+
+        <p class="eyebrow">Upload two CSVs to compare directly</p>
+        <p class="field-label" style="margin:-4px 0 8px;">A one-off comparison with no persisted history — for that,
           use "Watch a source" above. Also reachable via SQL or Google Sheets; see <a href="/docs">API docs</a>.</p>
         <div class="upload-row">
           <div class="field">
@@ -428,37 +430,6 @@ footer a { color: var(--accent-strong); }
     <div class="dash-empty" id="dash-empty">Loading&hellip;</div>
     <div id="dash-webhook" style="display:none; margin-top:14px; font-size:12.5px; color:var(--muted);">
       <span style="font-weight:600; color:var(--accent-strong);">🔔</span> <span id="dash-webhook-text"></span>
-    </div>
-  </div>
-
-  <div class="panel" style="margin-top:20px;">
-    <p class="eyebrow">Not just a demo — a workflow component</p>
-    <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; font-size:12.5px; color:var(--muted);">
-      <div style="border:1px solid var(--line); border-radius:7px; padding:10px 12px;">
-        <span style="color:var(--ink); font-weight:600;">📡 REST API</span><br>
-        16 endpoints — any scheduler,<br>CI pipeline, or monitoring tool<br>can call <code>POST /investigate</code>
-      </div>
-      <div style="border:1px solid var(--line); border-radius:7px; padding:10px 12px;">
-        <span style="color:var(--ink); font-weight:600;">🧠 MCP server</span><br>
-        Qwen Cloud agents use<br><code>investigate_scenario</code>,<br><code>investigate_sql</code> as tools
-      </div>
-      <div style="border:1px solid var(--line); border-radius:7px; padding:10px 12px;">
-        <span style="color:var(--ink); font-weight:600;">🔌 Live connectors</span><br>
-        SQL (Postgres/MySQL/SQLite)<br>
-        Google Sheets<br>
-        CSV upload · Watch a source
-      </div>
-      <div style="border:1px solid var(--line); border-radius:7px; padding:10px 12px;">
-        <span style="color:var(--ink); font-weight:600;">🔔 Webhooks</span><br>
-        Slack · Discord · Teams<br>
-        Auto-formatted EXECUTE<br>notifications on every action
-      </div>
-      <div style="border:1px solid var(--line); border-radius:7px; padding:10px 12px;">
-        <span style="color:var(--ink); font-weight:600;">🐳 Docker</span><br>
-        One container · one port<br>
-        Non-root user · HEALTHCHECK<br>
-        Alibaba Cloud FC ready
-      </div>
     </div>
   </div>
 
