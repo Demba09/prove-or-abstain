@@ -403,17 +403,18 @@ footer a { color: var(--accent-strong); }
     </details>
   </div>
 
-  <details class="panel advanced" id="dashDetails">
-    <summary>Autopilot dashboard — background checks, active alerts, executions</summary>
-    <div class="advanced-body">
-      <div class="dash-header">
-        <button class="secondary" type="button" id="dash-check-btn" onclick="runAutonomousCheck()">run autonomous check</button>
-      </div>
-      <div class="dash-stats" id="dash-stats"></div>
-      <div id="dash-alerts"></div>
-      <div class="dash-empty" id="dash-empty">Loading&hellip;</div>
+  <div class="panel" id="dashPanel">
+    <div class="dash-header">
+      <h2>Autopilot dashboard — autonomous monitoring</h2>
+      <button class="secondary" type="button" id="dash-check-btn" onclick="runAutonomousCheck()">run autonomous check</button>
     </div>
-  </details>
+    <div class="dash-stats" id="dash-stats"></div>
+    <div id="dash-alerts"></div>
+    <div class="dash-empty" id="dash-empty">Loading&hellip;</div>
+    <div id="dash-webhook" style="display:none; margin-top:14px; font-size:12.5px; color:var(--muted);">
+      <span style="font-weight:600; color:var(--accent-strong);">🔔</span> <span id="dash-webhook-text"></span>
+    </div>
+  </div>
 
   <footer>
     Every number comes from pandas/numpy; the LLM only orders the dimensions to try, routes free-text
@@ -460,6 +461,14 @@ async function call(url, opts) {
     const body = await r.json();
     if (!r.ok) throw new Error(body.detail ? JSON.stringify(body.detail) : r.statusText);
     render(body);
+    // Show webhook notification if an action was executed
+    if (body.action && body.action.kind === 'EXECUTE') {
+      const wh = $('dash-webhook');
+      wh.style.display = 'block';
+      $('dash-webhook-text').textContent =
+        'Autopilot sent notification: ' + body.action.detail +
+        (body.root_cause ? ' (' + body.root_cause.dimension + '=' + body.root_cause.segment + ')' : '');
+    }
     loadDashboard();   // an EXECUTE just happened, or didn't — either way, reflect it now, not in up to 30s
   } catch (e) {
     fail(e.message);
@@ -843,8 +852,15 @@ async function runAutonomousCheck() {
     const r = await fetch('/investigate/check', {method: 'POST'});
     const body = await r.json();
     if (!r.ok) throw new Error(body.detail || r.statusText);
-    alert('Autonomous check complete: ' + body.verdict + '\n' +
-      body.panels.map(p => '  ' + p.panel + ' → ' + p.verdict + ' (' + p.action.kind + ')').join('\n'));
+    // Show webhook simulation
+    const webhook = $('dash-webhook');
+    const acted = body.panels.filter(p => p.action && p.action.kind === 'EXECUTE');
+    if (acted.length) {
+      webhook.style.display = 'block';
+      $('dash-webhook-text').textContent =
+        'Autopilot sent ' + acted.length + ' notification(s) — ' +
+        acted.map(p => p.panel + ': ' + p.root_cause.dimension + '=' + p.root_cause.segment).join(', ');
+    }
     loadDashboard();
   } catch (e) {
     fail(e.message);
@@ -853,11 +869,9 @@ async function runAutonomousCheck() {
   }
 }
 
-// load only when the dashboard is actually opened, then keep it fresh while open
-$('dashDetails').addEventListener('toggle', () => {
-  if ($('dashDetails').open) loadDashboard();
-});
-setInterval(() => { if ($('dashDetails').open) loadDashboard(); }, 30000);
+// Load dashboard immediately and keep it fresh
+loadDashboard();
+setInterval(loadDashboard, 30000);
 </script>
 </body>
 </html>
